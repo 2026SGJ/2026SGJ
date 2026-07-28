@@ -1,8 +1,6 @@
 import HEROS from '../../assets/enum/heros/names.js';
 import Vec2 from '../../utils/vec2.js';
 
-
-const SPEED = 15;
 class Player {
     constructor(playerId) {
         this.uuid = playerId;
@@ -16,7 +14,11 @@ class Player {
         this.runAnimate = 0;
         this.animateState = 'idle';
         this.eventHandlers = {};
-        this.frame = 0;
+        // this.frame = 0;
+        this.args = {
+            speed: 15
+        };
+        this.buffs = [];
         // this.lastAnimateFrame = 0;
         this.on('keyboardEvent', ({ type, key }) => {
             // console.log(type, key);
@@ -68,17 +70,17 @@ class Player {
             return 'idle';
         }
         // console.log(this.runAnimate);
-        this.runAnimate = (this.runAnimate + this.speed.length()/20) % 3;
+        this.runAnimate = (this.runAnimate + this.speed.length()/(1.41*this.args.speed)) % 3;
         return `run${Math.trunc(this.runAnimate)}`;
     }
 
     render() {
         if( this.dx || this.dy) {
-            this.speed.add({ x: this.dx * SPEED, y: this.dy * SPEED });
-            if (this.speed.x > 25) this.speed.x = 25;
-            if (this.speed.y > 25) this.speed.y = 25;
-            if (this.speed.x < -25) this.speed.x  -25; 
-            if (this.speed.y < -25) this.speed.y  -25; 
+            this.speed.add({ x: this.dx * this.args.speed, y: this.dy * this.args.speed });
+            if (this.speed.x > this.args.speed) this.speed.x = this.args.speed;
+            if (this.speed.y > this.args.speed) this.speed.y = this.args.speed;
+            if (this.speed.x < -this.args.speed) this.speed.x  -this.args.speed; 
+            if (this.speed.y < -this.args.speed) this.speed.y  -this.args.speed; 
         }
         // this.runAnimate = (this.runAnimate+1)%3;
         if (this.speed.lengthSq() <=0.01) {
