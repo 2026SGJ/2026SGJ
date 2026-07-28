@@ -2,25 +2,25 @@ import room from '../network/index.js';
 
 let playerList = {};
 function PlayerEvent() {
-    let messageHandlers = {};
-    this.prototype.trigger = function (event, message) {
-        if (messageHandlers[event]) {
-            messageHandlers[event].forEach(handler => handler(message));
-        }
-    };
-    this.prototype.on = function (event, handler) {
-        if (!messageHandlers[event]) {
-            messageHandlers[event] = [];
-        }
-        messageHandlers[event].push(handler);
-    };
+    this.messageHandlers = {};
 }
+PlayerEvent.prototype.trigger = function (event, message) {
+    if (this.messageHandlers[event]) {
+        this.messageHandlers[event].forEach(handler => handler(message));
+    }
+};
+PlayerEvent.prototype.on = function (event, handler) {
+    if (!this.messageHandlers[event]) {
+        this.messageHandlers[event] = [];
+    }
+    this.messageHandlers[event].push(handler);
+};
 
 let playerEvent = new PlayerEvent();
 export default playerEvent;
 
 room.onMessage('syscmd:playerRemoved', (message) => {
-    const src = message.who.extra.uuid;
+    const src = message.player.uuid;
     if (playerList[src]) {
         delete playerList[src];
         playerEvent.trigger('playerRemoved', { player: src, event: message.msg });
