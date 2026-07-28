@@ -14,6 +14,7 @@ class Player {
         this.runAnimate = 0;
         this.animateState = 'idle';
         this.eventHandlers = {};
+        this.eventQueue = [];
         // this.frame = 0;
         this.args = {
             speed: 15
@@ -86,8 +87,9 @@ class Player {
         if (this.speed.lengthSq() <=0.01) {
             this.speed = new Vec2(0, 0);
         }
+        this.x+=this.speed.x;
+        this.y+=this.speed.y;
         this.speed.scale(0.85);
-        // const asset = this.animate();
         return [
             {
                 type: 'update',
@@ -97,7 +99,7 @@ class Player {
                 isShowed: true,
                 id: this.uuid,
                 scale: 100,
-                dir: 90
+                dir: this.dir
             }
         ]
     }
