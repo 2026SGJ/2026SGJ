@@ -8,7 +8,7 @@ class Entity {
             asset: asset,
             isShowed: isShowed,
             color: effects?.color || 0,
-            ghost: effects?.ghost || false,
+            ghost: effects?.ghost || 0,
             scale: effects?.scale || 100
         };
     }
