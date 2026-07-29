@@ -58,6 +58,7 @@ class Player {
     processEvents() {
         while (this.eventQueue.length() > 0) {
             const { type, key } = this.eventQueue.shift();
+            console.log({type, key});
             if (type === 'KeyHolding') {
                 this.dx=this.dy=0;
                 key.forEach(_=>{
