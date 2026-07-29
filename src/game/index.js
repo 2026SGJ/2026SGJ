@@ -32,7 +32,8 @@ class Game {
         });
         room.onMessage('C2SUpdateRender', ({ who, msg }) => {
             const i = this.players[who.extra.uuid];
-            render(who.extra.uuid, i.render(world.culling));
+            if (!i) return;
+            render(who.extra.uuid, i.render(this.world.culling));
         });
     }
 
