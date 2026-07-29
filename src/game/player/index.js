@@ -104,7 +104,7 @@ class Player {
         this.costume = `cat_${this.animate()}`;
     }
 
-    render() {
+    render(f) {
         return [
             {
                 type: 'update',
