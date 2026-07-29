@@ -3,6 +3,7 @@ import playerEvent from '../sessions/index.js';
 import Player from './player/index.js';
 import World from './match/world.js';
 import room from '../network/index.js';
+import render from './render.js';
 
 /**
  * Game类
