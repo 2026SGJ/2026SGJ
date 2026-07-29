@@ -1,9 +1,9 @@
 import render from "./render.js";
 
-const matchLoop= async (players) => {
+const matchLoop= async (players, world) => {
     for(const i in players){
         (i=>{
-            render(i.uuid, i.render());
+            i.tick();
         })(players[i]);
     }
 };
