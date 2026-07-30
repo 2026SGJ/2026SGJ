@@ -111,7 +111,7 @@ class Player {
         for (let i of entities) {
             const t = {
                 type: 'update',
-                ...i.data()
+                ...i.data
             };
             renderData.push(t);
         }
