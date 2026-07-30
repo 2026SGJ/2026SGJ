@@ -31,7 +31,6 @@ class Game {
             try {this.players[player].trigger('keyboardEvent', (JSON.parse(event).data));} catch (_){}
         });
         room.onMessage('C2SUpdateRender', ({ who, msg }) => {
-            console.log(`render for ${who.extra.uuid}`, !this.players[who.extra.uuid]);
             const i = this.players[who.extra.uuid];
             if (!i) return;
             render(who.extra.uuid, i.render(this.world.culling));

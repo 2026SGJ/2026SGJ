@@ -35,6 +35,7 @@ class World {
                 visibleEntities.push(_);
             }
         });
+        return visibleEntities;
     }
 }
 

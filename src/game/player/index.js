@@ -106,6 +106,10 @@ class Player {
     }
 
     render(f) {
+        let entities = f(this.x, this.y, 320, 180);
+        for ( let i of entities) {
+            i.type = 'update';
+        }
         return [
             {
                 type: 'update',
@@ -116,7 +120,8 @@ class Player {
                 id: this.uuid,
                 scale: 100,
                 dir: this.dir
-            }
+            },
+            ...entities
         ]
     }
 }
