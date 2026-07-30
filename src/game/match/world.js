@@ -7,6 +7,7 @@ class World {
     constructor({ map_id }) {
         this.map_id = map_id ?? null;
         this.entities = [];
+        this.init();
     }
 
     async init() {
