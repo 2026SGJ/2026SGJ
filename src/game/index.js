@@ -26,6 +26,10 @@ class Game {
             console.log(player);
             this.players[player] = (new Player(player));
         });
+        playerEvent.on('playerRemoved', ({player, event}) => {
+            console.log(`Player removed: ${player}`);
+            delete this.players[player];
+        });
         playerEvent.on('keyboardEvent', ({player, event}) => {
             // console.log(typeof event, typeof event.data, event);
             try {this.players[player].trigger('keyboardEvent', (JSON.parse(event).data));} catch (_){}
@@ -33,7 +37,15 @@ class Game {
         room.onMessage('C2SUpdateRender', ({ who, msg }) => {
             const i = this.players[who.extra.uuid];
             if (!i) return;
-            render(who.extra.uuid, i.render(this.world.culling.bind(this.world)));
+            // 收集其他玩家的远程数据
+            const otherPlayersData = [];
+            for (const [id, player] of Object.entries(this.players)) {
+                if (id !== who.extra.uuid) {
+                    otherPlayersData.push(player.remoteData());
+                }
+            }
+            const selfRender = i.render(this.world.culling.bind(this.world));
+            render(who.extra.uuid, [...selfRender, ...otherPlayersData]);
         });
     }
 
