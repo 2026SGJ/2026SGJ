@@ -110,8 +110,8 @@ class Player {
         let renderData = [];
         for (let i of entities) {
             const t = {
+                ...i.data,
                 type: 'update',
-                ...i.data
             };
             renderData.push(t);
         }
