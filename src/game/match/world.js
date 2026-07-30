@@ -12,7 +12,7 @@ class World {
 
     async init() {
         // 初始化地图
-        const mapData = JSON.parse(fs.readFileSync(`./src/map/${this.map_id}.json`, 'utf-8'));
+        const mapData = JSON.parse(fs.readFileSync(`./src/game/map/${this.map_id}.json`, 'utf-8'));
         this.map_id = mapData.assetId;
         for (const entity of mapData.entities) {
             // 初始化实体
