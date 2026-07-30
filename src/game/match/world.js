@@ -21,9 +21,6 @@ class World {
                 const titleEntity = new Title(entity);
                 this.entities.push(titleEntity);
                 continue;
-            } else {
-                const entity = new Entity(entity);
-                this.entities.push(entity);
             }
             this.entities.push(new Entity(entity));
         }
