@@ -27,14 +27,15 @@ class World {
     }
 
     culling (x, y, halfw, halfh) {
-        let visibleEntities = [];
-        this.entities.forEach(_=>{
-            if(Math.abs(_.x-x) <= halfw && Math.abs(_.y-y) <= halfh) {
-                visibleEntities.push(_);
-            }
-        });
-        console.log(visibleEntities);
-        return visibleEntities;
+        // let visibleEntities = [];
+        // this.entities.forEach(_=>{
+        //     if(Math.abs(_.x-x) <= halfw && Math.abs(_.y-y) <= halfh) {
+        //         visibleEntities.push(_);
+        //     }
+        // });
+        // console.log(visibleEntities);
+        // return visibleEntities;
+        return this.entities;
     }
 }
 
