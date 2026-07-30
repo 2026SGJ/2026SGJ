@@ -8,7 +8,8 @@
             "y": 0,
             "asset": "empty",
             "scale": 100,
-            "isShowed": true
+            "isShowed": true,
+            "dir": 90
         }
     ]
 }

@@ -107,8 +107,13 @@ class Player {
 
     render(f) {
         let entities = f(this.x, this.y, 320, 180);
-        for ( let i of entities) {
-            i.type = 'update';
+        let renderData = [];
+        for (let i of entities) {
+            const t = {
+                type: 'update',
+                ...i.data()
+            };
+            renderData.push(t);
         }
         return [
             {
@@ -121,7 +126,7 @@ class Player {
                 scale: 100,
                 dir: this.dir
             },
-            ...entities
+            ...renderData
         ]
     }
 }
