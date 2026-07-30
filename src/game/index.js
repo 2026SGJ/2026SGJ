@@ -8,11 +8,12 @@ import render from './render.js';
 /**
  * Game类
  * 游戏主逻辑
+ * 以 sessionId 为 key 追踪玩家实体
  */
 class Game {
     constructor() {
         this.matchLoop = null;
-        this.players = {};
+        this.players = {};  // sessionId → Player
         this.world = null;
         this.init();
     }
@@ -22,18 +23,50 @@ class Game {
         console.log('游戏初始化');
         this.world = new World({ map_id: 'test' });
         this.matchLoop = setInterval(_=>matchLoop(this.players, this.world), 1000 / 20); // 每秒20 Ticks
-        playerEvent.on('newPlayerAdded', ({player, event}) => {
-            console.log(player);
-            this.players[player] = (new Player(player));
+
+        // 新玩家加入（白名单每个 session 都是新玩家；非白名单首次登录也是新玩家）
+        playerEvent.on('newPlayerAdded', ({ sessionId, uuid, event }) => {
+            console.log(`Player added: sessionId=${sessionId}, uuid=${uuid}`);
+            this.players[sessionId] = new Player(sessionId, uuid);
         });
-        playerEvent.on('keyboardEvent', ({player, event}) => {
-            // console.log(typeof event, typeof event.data, event);
-            try {this.players[player].trigger('keyboardEvent', (JSON.parse(event).data));} catch (_){}
+
+        // 非白名单玩家重复登录：保留世界状态迁移到新 sessionId，清空事件队列
+        playerEvent.on('playerReconnected', ({ oldSessionId, newSessionId, uuid, event }) => {
+            if (this.players[oldSessionId]) {
+                const player = this.players[oldSessionId];
+                player.sessionId = newSessionId;
+                player.clearEventQueue();
+                this.players[newSessionId] = player;
+                delete this.players[oldSessionId];
+                console.log(`Player ${uuid} reconnected: old=[${oldSessionId}] → new=[${newSessionId}], event queue cleared, world state preserved.`);
+            } else {
+                console.warn(`Player ${uuid} old session [${oldSessionId}] not found, creating new instance.`);
+                this.players[newSessionId] = new Player(newSessionId, uuid);
+            }
         });
+
+        // 玩家移除
+        playerEvent.on('playerRemoved', ({ sessionId, uuid, event }) => {
+            if (this.players[sessionId]) {
+                delete this.players[sessionId];
+                console.log(`Player removed: sessionId=${sessionId}, uuid=${uuid}`);
+            }
+        });
+
+        // 键盘事件
+        playerEvent.on('keyboardEvent', ({ sessionId, uuid, event }) => {
+            const player = this.players[sessionId];
+            if (!player) return;
+            try {
+                player.trigger('keyboardEvent', JSON.parse(event).data);
+            } catch (_) {}
+        });
+
+        // 渲染请求（dest 使用 sessionId）
         room.onMessage('C2SUpdateRender', ({ who, msg }) => {
-            const i = this.players[who.extra.uuid];
-            if (!i) return;
-            render(who.extra.uuid, i.render(this.world.culling.bind(this.world)));
+            const player = this.players[who.sessionId];
+            if (!player) return;
+            render(who.sessionId, player.render(this.world.culling.bind(this.world)));
         });
     }
 

@@ -2,8 +2,9 @@ import HEROS from '../../assets/enum/heros/names.js';
 import Vec2 from '../../utils/vec2.js';
 
 class Player {
-    constructor(playerId) {
-        this.uuid = playerId;
+    constructor(sessionId, uuid) {
+        this.sessionId = sessionId;
+        this.uuid = uuid;
         this.x = 0;
         this.y = 0;
         this.dir = 90; // 和移动无关，仅决定渲染
@@ -97,6 +98,14 @@ class Player {
         this.x+=this.speed.x;
         this.y+=this.speed.y;
         this.speed.scale(0.85);
+    }
+
+    /**
+     * 清空事件队列，保留世界状态（x, y, speed 等）
+     * 用于一号多登踢旧留新场景
+     */
+    clearEventQueue() {
+        this.eventQueue = [];
     }
 
     tick() {
