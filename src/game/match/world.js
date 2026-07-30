@@ -33,6 +33,7 @@ class World {
                 visibleEntities.push(_);
             }
         });
+        console.log(visibleEntities);
         return visibleEntities;
     }
 }
