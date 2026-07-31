@@ -100,6 +100,19 @@ class Player {
         this.speed.scale(0.85);
     }
 
+    remoteData() {
+        return {
+            type: 'update',
+            x: this.x,
+            y: this.y,
+            asset: this.costume,
+            isShowed: true,
+            id: this.uuid,
+            scale: 100,
+            dir: this.dir
+        };
+    }
+  
     /**
      * 清空事件队列，保留世界状态（x, y, speed 等）
      * 用于一号多登踢旧留新场景

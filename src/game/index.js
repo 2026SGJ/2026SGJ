@@ -44,7 +44,7 @@ class Game {
                 this.players[newSessionId] = new Player(newSessionId, uuid);
             }
         });
-
+      
         // 玩家移除
         playerEvent.on('playerRemoved', ({ sessionId, uuid, event }) => {
             if (this.players[sessionId]) {
@@ -64,9 +64,17 @@ class Game {
 
         // 渲染请求（dest 使用 sessionId）
         room.onMessage('C2SUpdateRender', ({ who, msg }) => {
-            const player = this.players[who.sessionId];
-            if (!player) return;
-            render(who.sessionId, player.render(this.world.culling.bind(this.world)));
+            const i = this.players[who.extra.uuid];
+            if (!i) return;
+            // 收集其他玩家的远程数据
+            const otherPlayersData = [];
+            for (const [id, player] of Object.entries(this.players)) {
+                if (id !== who.extra.uuid) {
+                    otherPlayersData.push(player.remoteData());
+                }
+            }
+            const selfRender = i.render(this.world.culling.bind(this.world));
+            render(who.extra.uuid, [...selfRender, ...otherPlayersData]);
         });
     }
 
