@@ -74,7 +74,7 @@ class Game {
                 }
             }
             const selfRender = i.render(this.world.culling.bind(this.world));
-            render(who.extra.uuid, [...selfRender, ...otherPlayersData]);
+            render(who.sessionId, [...selfRender, ...otherPlayersData]);
         });
     }
 
