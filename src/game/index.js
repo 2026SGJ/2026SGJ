@@ -64,7 +64,7 @@ class Game {
 
         // 渲染请求（dest 使用 sessionId）
         room.onMessage('C2SUpdateRender', ({ who, msg }) => {
-            const i = this.players[who.extra.uuid];
+            const i = this.players[who.sessionId];
             if (!i) return;
             // 收集其他玩家的远程数据
             const otherPlayersData = [];
