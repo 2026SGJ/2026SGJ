@@ -69,7 +69,7 @@ class Game {
             // 收集其他玩家的远程数据
             const otherPlayersData = [];
             for (const [id, player] of Object.entries(this.players)) {
-                if (id !== who.extra.uuid) {
+                if (id !== who.sessionId) {
                     otherPlayersData.push(player.remoteData());
                 }
             }
