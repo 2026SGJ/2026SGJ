@@ -1,6 +1,6 @@
 import { matchLoop } from './mainloop.js';
 import playerEvent from '../sessions/index.js';
-import Player from './player/index.js';
+import Player from './match/player/index.js';
 import World from './match/world.js';
 import room from '../network/index.js';
 import render from './render.js';
@@ -21,30 +21,21 @@ class Game {
     init() {
         // 初始化游戏
         console.log('游戏初始化');
-        this.world = new World({ map_id: 'test' });
+        this.world = new World({ map_id: '0' });
         this.matchLoop = setInterval(_=>matchLoop(this.players, this.world), 1000 / 20); // 每秒20 Ticks
 
-        // 新玩家加入（白名单每个 session 都是新玩家；非白名单首次登录也是新玩家）
-        playerEvent.on('newPlayerAdded', ({ sessionId, uuid, event }) => {
-            console.log(`Player added: sessionId=${sessionId}, uuid=${uuid}`);
-            this.players[sessionId] = new Player(sessionId, uuid);
-        });
-
-        // 非白名单玩家重复登录：保留世界状态迁移到新 sessionId，清空事件队列
-        playerEvent.on('playerReconnected', ({ oldSessionId, newSessionId, uuid, event }) => {
-            if (this.players[oldSessionId]) {
-                const player = this.players[oldSessionId];
-                player.sessionId = newSessionId;
-                player.clearEventQueue();
-                this.players[newSessionId] = player;
-                delete this.players[oldSessionId];
-                console.log(`Player ${uuid} reconnected: old=[${oldSessionId}] → new=[${newSessionId}], event queue cleared, world state preserved.`);
-            } else {
-                console.warn(`Player ${uuid} old session [${oldSessionId}] not found, creating new instance.`);
-                this.players[newSessionId] = new Player(newSessionId, uuid);
+        playerEvent.on('beforeNewPlayerAdded', ({ sessionId, uuid, event }) => {
+            try {
+                const data = JSON.parse(event).data;
+                this.players[sessionId] = new Player(sessionId, data);
+                console.log(`Player added: sessionId=${sessionId}, uuid=${uuid}`);
+                return true;
+            } catch (_) {
+                console.error(_);
+                return false;
             }
         });
-      
+
         // 玩家移除
         playerEvent.on('playerRemoved', ({ sessionId, uuid, event }) => {
             if (this.players[sessionId]) {

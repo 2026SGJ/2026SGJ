@@ -1,31 +1,30 @@
-﻿import HEROS from '../../assets/enum/heros/names.js';
-import Vec2 from '../../utils/vec2.js';
+import HERODATAS from '../../../assets/data/heros/index.js';
+import Vec2 from '../../../utils/vec2.js';
 
 class Player {
-    constructor(sessionId, uuid) {
+    constructor(sessionId, data) {
         this.sessionId = sessionId;
-        this.uuid = uuid;
         this.x = 0;
         this.y = 0;
         this.dir = 90; // 和移动无关，仅决定渲染
         this.speed = new Vec2(0, 0);
         this.dx = 0;
         this.dy = 0;
-        this.hero = 'cat';
+        this.hero = data.hero || 'cat';
         this.costume = 'empty';
         this.runAnimate = 0;
+        this.attackForward = 0;
+        this.attacking = false;
         this.animateState = 'idle';
         this.eventHandlers = {};
         this.eventQueue = [];
         // this.frame = 0;
-        this.args = {
-            speed: 15
-        };
+        this.args = HERODATAS[this.hero] || (_=>{throw new Error(`Hero data not found for hero: ${this.hero}`)})();
         this.buffs = [];
         // this.lastAnimateFrame = 0;
         this.on('keyboardEvent', (a) => {
             this.eventQueue.push(a);
-        })
+        });
     }
 
     trigger(type, data) {
@@ -53,53 +52,83 @@ class Player {
         }
         // console.log(this.runAnimate);
         this.runAnimate = (this.runAnimate + this.speed.length()/(1.41*this.args.speed)) % 3;
-        return `run${Math.trunc(this.runAnimate)}`;
+        return `run${Math.trunc(this.runAnimate)+1}`;
     }
 
     processEvents() {
         while (this.eventQueue.length > 0) {
             const { type, key } = this.eventQueue.shift();
             if (type === 'KeyHolding') {
-                this.dx=this.dy=0;
-                key.forEach(_=>{
-                    switch ( _ ) {
-                        case 'KeyW': 
-                            this.dy = 1;
-                            break;
-                        case 'KeyS':
-                            this.dy = -1;
-                            break;
-                        case 'KeyA':
-                            this.dx = -1;
-                            this.dir = -90;
-                            break;
-                        case 'KeyD':
-                            this.dx = 1;
-                            this.dir = 90;
-                            break;
-                    }
-                })
+                this.processKeyholding(key);
             }
         }
     }
 
+    processKeyholding(key) {
+        this.dx=this.dy=0;
+        let attacking = this.attacking;
+        this.attacking = false;
+        key.forEach(_=>{
+            switch ( _ ) {
+                case 'KeyW': 
+                    this.dy = 1;
+                    break;
+                case 'KeyS':
+                    this.dy = -1;
+                    break;
+                case 'KeyA':
+                    this.dx = -1;
+                    this.dir = -90;
+                    break;
+                case 'KeyD':
+                    this.dx = 1;
+                    this.dir = 90;
+                    break;
+                case 'KeyR':
+                    this.attacking = true;
+                    if(!attacking) {
+                        this.attackForward = this.args.attacks.basic.forward || 0;
+                    }
+                    break;
+            }
+        })
+    }
+
     move() {
-        /*if( this.dx || this.dy) {
-            this.speed.add({ x: this.dx * this.args.speed, y: this.dy * this.args.speed });
-            if (this.speed.x > this.args.speed) this.speed.x = this.args.speed;
-            if (this.speed.y > this.args.speed) this.speed.y = this.args.speed;
-            if (this.speed.x < -this.args.speed) this.speed.x  -this.args.speed; 
-            if (this.speed.y < -this.args.speed) this.speed.y  -this.args.speed; 
-        }*/
         if (this.dx) this.speed.x = this.dx * this.args.speed;
         if (this.dy) this.speed.y = this.dy * this.args.speed;
-        // this.runAnimate = (this.runAnimate+1)%3;
-        if (this.speed.lengthSq() <=0.01) {
+        if (this.speed.lengthSq() <=0.09) {
             this.speed = new Vec2(0, 0);
         }
         this.x+=this.speed.x;
         this.y+=this.speed.y;
         this.speed.scale(0.85);
+    }
+
+    processSkills() {
+        if (this.attacking) {
+            // 处理攻击逻辑
+            this.attackForward = Math.max(0, this.attackForward - 0.1);
+            if (this.attackForward <= 0) {
+                this.attacking = false;
+                // TODO: 触发攻击命中逻辑
+            }
+        }
+    }
+
+    processBuffs() {
+        const now = Date.now();
+        this.buffs = this.buffs.filter(buff => {
+            if (buff.isExpired()) {
+                return true;
+            } else {
+                // Buff 已过期，执行清除逻辑
+                if (buff.onExpire) {
+                    buff.onExpire(this);
+                }
+                return false;
+            }
+        });
     }
 
     remoteData() {
@@ -118,7 +147,8 @@ class Player {
     tick() {
         this.processEvents();
         this.move();
-        this.costume = `cat_${this.animate()}`;
+        this.processSkills();
+        this.costume = `${this.hero}_${this.animate()}`;
     }
 
     render(f) {
@@ -126,7 +156,7 @@ class Player {
         let renderData = [];
         for (let i of entities) {
             const t = {
-                ...i.data,
+                ...i.getData(),
                 type: 'update',
             };
             renderData.push(t);
@@ -144,6 +174,22 @@ class Player {
             },
             ...renderData
         ]
+    }
+
+    takeDamage(amount) {
+        this.args.health -= amount;
+        if (this.args.health <= 0) {
+            this.args.health = 0;
+            // 玩家死亡逻辑
+            console.log(`Player ${this.sessionId} has died.`);
+        }
+    }
+
+    giveBuff(buff) {
+        this.buffs.push(buff);
+        if (buff.onApply) {
+            buff.onApply(this);
+        }
     }
 }
 

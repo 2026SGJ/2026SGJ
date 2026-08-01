@@ -11,9 +11,19 @@ function PlayerEvent() {
     this.messageHandlers = {};
 }
 PlayerEvent.prototype.trigger = function (event, message) {
+    let flag = true;
     if (this.messageHandlers[event]) {
-        this.messageHandlers[event].forEach(handler => handler(message));
+        // this.messageHandlers[event].forEach(handler => handler(message));
+        for (const handler of this.messageHandlers[event]) {
+            try {
+                if (!handler(message)) flag = false;
+            } catch (err) {
+                console.error(err);
+                flag = false;
+            }
+        }
     }
+    return flag;
 };
 PlayerEvent.prototype.on = function (event, handler) {
     if (!this.messageHandlers[event]) {
@@ -44,7 +54,10 @@ room.onMessage('C2SHandshake', (message) => {
     const sessionId = message.who.sessionId;
 
     activeSessions.add(sessionId);
-    playerEvent.trigger('beforeNewPlayerAdded', { sessionId, uuid, event: message.msg });
+    if (!playerEvent.trigger('beforeNewPlayerAdded', { sessionId, uuid, event: message.msg })) {
+        console.log(`beforeNewPlayerAdded handler returned false for sessionId=${sessionId}, uuid=${uuid}. Player not added.`);
+        return;
+    }
 
     room.send('S2CHandshake', JSON.stringify({
         dest: sessionId,
@@ -83,4 +96,28 @@ room.onMessage('C2SMouseEvent', (message) => {
 
     const uuid = message.who.extra.uuid;
     playerEvent.trigger('mouseEvent', { sessionId, uuid, event: message.msg });
+});
+
+room.onMessage('C2SGamepadEvent', (message) => {
+    const sessionId = message.who.sessionId;
+
+    if (!activeSessions.has(sessionId)) {
+        console.log(`C2SGamepadEvent from unknown session ${sessionId} ignored.`);
+        return;
+    }
+
+    const uuid = message.who.extra.uuid;
+    playerEvent.trigger('gamepadEvent', { sessionId, uuid, event: message.msg });
+});
+
+room.onMessage('C2STouchEvent', (message) => {
+    const sessionId = message.who.sessionId;
+
+    if (!activeSessions.has(sessionId)) {
+        console.log(`C2STouchEvent from unknown session ${sessionId} ignored.`);
+        return;
+    }
+
+    const uuid = message.who.extra.uuid;
+    playerEvent.trigger('touchEvent', { sessionId, uuid, event: message.msg });
 });
