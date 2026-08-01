@@ -109,7 +109,7 @@ class Player {
             y: this.y,
             asset: this.costume,
             isShowed: true,
-            id: this.uuid,
+            id: this.sessionId,
             scale: 100,
             dir: this.dir
         };
@@ -138,7 +138,7 @@ class Player {
                 y: this.y,
                 asset: this.costume,
                 isShowed: true,
-                id: this.uuid,
+                id: this.sessionId,
                 scale: 100,
                 dir: this.dir
             },
