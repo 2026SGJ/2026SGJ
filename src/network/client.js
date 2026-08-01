@@ -1,5 +1,6 @@
 import { Client } from 'colyseus.js';
 import { type, Schema, MapSchema } from '@colyseus/schema';
+import logger from '../../logger/index.js';
 
 class Player extends Schema {
   constructor() {
@@ -34,6 +35,7 @@ type("string")(GameState.prototype, "extra");
 type({ map: Player })(GameState.prototype, "players");
 
 const joinRoom = async (server, roomType, projectId, roomId, auth) => {
+    logger.debug(`[client] joinOrCreate 开始: server=${server}, roomType=${roomType}, gid=${projectId}-${roomId}`);
     const client = new Client(server, {
         headers: {
             'Cookie': auth.cookie
@@ -47,12 +49,13 @@ const joinRoom = async (server, roomType, projectId, roomId, auth) => {
             extra: auth.extra,
             filter: { name: 'match'}
         }, GameState);
-        console.log("Joined successfully!", room);
+        logger.log(`[client] joinOrCreate 成功: sessionId=${room.sessionId}, roomId=${room.id}`);
+        logger.debug(`[client] room 对象已创建: sessionId=${room.sessionId}, name=${room.name}`);
         return room;
     } catch (error) {
-        console.error("Failed to join room:", error);
+        logger.error(`[client] joinOrCreate 失败: ${error.message}`, error);
         throw error;
     }
-}
+};
 
-export { joinRoom}
+export { joinRoom };
