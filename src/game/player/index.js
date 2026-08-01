@@ -1,4 +1,4 @@
-import HEROS from '../../assets/enum/heros/names.js';
+﻿import HEROS from '../../assets/enum/heros/names.js';
 import Vec2 from '../../utils/vec2.js';
 
 class Player {
@@ -84,13 +84,15 @@ class Player {
     }
 
     move() {
-        if( this.dx || this.dy) {
+        /*if( this.dx || this.dy) {
             this.speed.add({ x: this.dx * this.args.speed, y: this.dy * this.args.speed });
             if (this.speed.x > this.args.speed) this.speed.x = this.args.speed;
             if (this.speed.y > this.args.speed) this.speed.y = this.args.speed;
             if (this.speed.x < -this.args.speed) this.speed.x  -this.args.speed; 
             if (this.speed.y < -this.args.speed) this.speed.y  -this.args.speed; 
-        }
+        }*/
+        if (this.dx) this.speed.x = this.dx * this.args.speed;
+        if (this.dy) this.speed.y = this.dy * this.args.speed;
         // this.runAnimate = (this.runAnimate+1)%3;
         if (this.speed.lengthSq() <=0.01) {
             this.speed = new Vec2(0, 0);
@@ -111,14 +113,6 @@ class Player {
             scale: 100,
             dir: this.dir
         };
-    }
-  
-    /**
-     * 清空事件队列，保留世界状态（x, y, speed 等）
-     * 用于一号多登踢旧留新场景
-     */
-    clearEventQueue() {
-        this.eventQueue = [];
     }
 
     tick() {
