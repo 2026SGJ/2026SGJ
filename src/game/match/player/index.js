@@ -105,13 +105,42 @@ class Player {
         this.speed.scale(0.85);
     }
 
-    processSkills() {
+    findTarget(players) {
+        let bestTarget = null;
+        let bestHealth = Infinity;
+        let bestDistance = Infinity;
+
+        for (const [id, player] of Object.entries(players)) {
+            if (id === this.sessionId) continue;
+
+            const dist = Math.hypot(this.x - player.x, this.y - player.y);
+            if (dist > 75) continue;
+
+            const health = player.args.health;
+            if (health < bestHealth || (health === bestHealth && dist < bestDistance)) {
+                bestTarget = player;
+                bestHealth = health;
+                bestDistance = dist;
+            }
+        }
+
+        return bestTarget;
+    }
+
+    processSkills(players) {
         if (this.attacking) {
-            // 处理攻击逻辑
             this.attackForward = Math.max(0, this.attackForward - 0.1);
             if (this.attackForward <= 0) {
                 this.attacking = false;
-                // TODO: 触发攻击命中逻辑
+                const target = this.findTarget(players);
+                if (target) {
+                    target.takeDamage(this.args.attacks.basic.damage);
+                    const knockback = this.args.attacks.basic.knockback;
+                    if (knockback) {
+                        const direction = new Vec2(target.x - this.x, target.y - this.y).normalize();
+                        target.speed.add(direction.scale(knockback));
+                    }
+                }
             }
         }
     }
@@ -144,10 +173,10 @@ class Player {
         };
     }
 
-    tick() {
+    tick(players) {
         this.processEvents();
         this.move();
-        this.processSkills();
+        this.processSkills(players);
         this.costume = `${this.hero}_${this.animate()}`;
     }
 
