@@ -29,6 +29,17 @@ class Game {
                 const data = JSON.parse(event).data;
                 this.players[sessionId] = new Player(sessionId, data);
                 console.log(`Player added: sessionId=${sessionId}, uuid=${uuid}`);
+                const i = this.players[sessionId];
+                setInterval(() => {
+                    const otherPlayersData = [];
+                    for (const [id, player] of Object.entries(this.players)) {
+                        if (id !== who.sessionId) {
+                            otherPlayersData.push(player.remoteData());
+                        }
+                    }
+                    const selfRender = i.render(this.world.culling.bind(this.world));
+                    render(who.sessionId, [...selfRender, ...otherPlayersData]);
+                }, 1000 / 30); // 每秒30帧
                 return true;
             } catch (_) {
                 console.error(_);

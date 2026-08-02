@@ -36,7 +36,7 @@ let playerEvent = new PlayerEvent();
 export default playerEvent;
 
 // ============================================================
-//  playerRemoved — 玩家连接断开
+//  syscmd:playerRemoved — 玩家连接断开
 // ============================================================
 room.onMessage('syscmd:playerRemoved', (message) => {
     const uuid = message.player.uuid;
@@ -45,6 +45,11 @@ room.onMessage('syscmd:playerRemoved', (message) => {
     activeSessions.delete(sessionId);
     playerEvent.trigger('playerRemoved', { sessionId, uuid, event: message.msg });
 });
+
+// ============================================================
+//  syscmd:newPlayerAdded — 玩家加入但未认证
+// ============================================================
+room.onMessage('syscmd:newPlayerAdded', (message) => {});
 
 // ============================================================
 //  C2SHandshake — 玩家握手/登录

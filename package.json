@@ -19,7 +19,7 @@
     "start": "node src/index.js"
   },
   "dependencies": {
+    "@colyseus/schema": "^4.0.30",
     "colyseus.js": "^0.16.22"
-  },
-  "devDependencies": {}
+  }
 }

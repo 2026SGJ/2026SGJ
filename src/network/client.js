@@ -20,6 +20,8 @@ type("number")(Player.prototype, "rotation");
 type("string")(Player.prototype, "sessionId");
 type("string")(Player.prototype, "uuid");
 type("string")(Player.prototype, "extra");
+type("number")(Player.prototype, "scale");
+type("string")(Player.prototype, "dir");
 
 class GameState extends Schema {
   constructor() {
@@ -47,7 +49,6 @@ const joinRoom = async (server, roomType, projectId, roomId, auth) => {
             extra: auth.extra,
             filter: { name: 'match'}
         }, GameState);
-        console.log("Joined successfully!", room);
         return room;
     } catch (error) {
         console.error("Failed to join room:", error);

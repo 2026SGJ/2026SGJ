@@ -21,6 +21,7 @@ class Player {
         this.eventQueue = [];
         // this.frame = 0;
         this.args = HERODATAS[this.hero] || (_=>{throw new Error(`Hero data not found for hero: ${this.hero}`)})();
+        this.health = this.args.health;
         this.buffs = [];
         // this.lastAnimateFrame = 0;
         this.on('keyboardEvent', (a) => {
@@ -121,7 +122,7 @@ class Player {
             const dist = Math.hypot(this.x - player.x, this.y - player.y);
             if (dist > 75) continue;
 
-            const health = player.args.health;
+            const health = player.health;
             if (health < bestHealth || (health === bestHealth && dist < bestDistance)) {
                 bestTarget = player;
                 bestHealth = health;
@@ -211,11 +212,13 @@ class Player {
     }
 
     takeDamage(amount) {
-        this.args.health -= amount;
-        if (this.args.health <= 0) {
-            this.args.health = 0;
+        this.health -= amount;
+        if (this.health <= 0) {
+            this.health = 0;
             // 玩家死亡逻辑
             console.log(`Player ${this.sessionId} has died.`);
+            this.x = this.y = 0; // 重置位置
+            this.health = this.args.health; // 重置血量
         }
     }
 
