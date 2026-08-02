@@ -8,6 +8,7 @@ class Player {
         this.y = 0;
         this.dir = 90; // 和移动无关，仅决定渲染
         this.speed = new Vec2(0, 0);
+        this.knockback = new Vec2(0, 0);
         this.dx = 0;
         this.dy = 0;
         this.hero = data.hero || 'cat';
@@ -95,14 +96,18 @@ class Player {
     }
 
     move() {
-        if (this.dx) this.speed.x = this.dx * this.args.speed;
-        if (this.dy) this.speed.y = this.dy * this.args.speed;
+        const kb = this.knockback.lengthSq();
+        if (this.dx && kb <= 16) this.speed.x = this.dx * this.args.speed;
+        if (this.dy && kb <= 16) this.speed.y = this.dy * this.args.speed;
         if (this.speed.lengthSq() <=0.09) {
             this.speed = new Vec2(0, 0);
         }
         this.x+=this.speed.x;
         this.y+=this.speed.y;
-        this.speed.scale(0.85);
+        this.x+=this.knockback.x;
+        this.y+=this.knockback.y;
+        this.speed.scale(kb > 16 ? 0.95 : 0.85);
+        this.knockback.scale(0.99);
     }
 
     findTarget(players) {
@@ -138,7 +143,7 @@ class Player {
                     const knockback = this.args.attacks.basic.knockback;
                     if (knockback) {
                         const direction = new Vec2(target.x - this.x, target.y - this.y).normalize();
-                        target.speed.add(direction.scale(knockback));
+                        target.takeKnockback(direction.scale(knockback));
                     }
                 }
             }
@@ -219,6 +224,10 @@ class Player {
         if (buff.onApply) {
             buff.onApply(this);
         }
+    }
+
+    takeKnockback(knockbackVector) {
+        this.knockback.add(knockbackVector);
     }
 }
 
