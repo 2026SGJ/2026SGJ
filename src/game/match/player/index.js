@@ -175,7 +175,10 @@ class Player {
             isShowed: true,
             id: this.sessionId,
             scale: 100,
-            dir: this.dir
+            dir: this.dir,
+            state: {
+                health: this.health,
+            }
         };
     }
 
@@ -196,17 +199,9 @@ class Player {
             };
             renderData.push(t);
         }
+        const selfdata = [this.remoteData()];
         return [
-            {
-                type: 'update',
-                x: this.x,
-                y: this.y,
-                asset: this.costume,
-                isShowed: true,
-                id: this.sessionId,
-                scale: 100,
-                dir: this.dir
-            },
+            ...selfdata,
             ...renderData
         ]
     }
