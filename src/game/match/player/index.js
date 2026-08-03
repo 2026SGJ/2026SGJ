@@ -116,6 +116,7 @@ class Player {
         this.x+=this.knockback.x;
         this.y+=this.knockback.y;
         for (const wall of world.walls) {
+            if (!this.hitbox || !wall?.hitbox) continue;
             if (collisionLeft(this.hitbox, wall.hitbox)) {
                 this.x+=wall.hitbox.x + wall.hitbox.width - this.hitbox.x;
             }
@@ -124,6 +125,7 @@ class Player {
             }
         }
         for (const wall of world.walls) {
+            if (!this.hitbox || !wall?.hitbox) continue;
             if (collisionTop(this.hitbox, wall.hitbox)) {
                 this.y+=wall.hitbox.y + wall.hitbox.height - this.hitbox.y;
             }

@@ -1,7 +1,7 @@
 import fs from 'fs';
 import Entity from './entity/entity.js';
 import Title from './entity/title.js';
-import { workerData } from 'worker_threads';
+import Wall from './entity/wall.js';
 
 class World {
     constructor({ map_id }) {
@@ -25,7 +25,7 @@ class World {
             }
             if (entity.type === 'wall') {
                 // 初始化墙体实体
-                const wallEntity = new Entity(entity);
+                const wallEntity = new Wall(entity);
                 this.walls.push(wallEntity);
                 this.entities.push(wallEntity);
                 continue;
