@@ -77,11 +77,12 @@ class Game {
         room.onMessage('C2SUpdateRender', ({ who, msg }) => {
             const i = this.players[who.sessionId];
             if (!i) return;
-            console.log(`渲染请求: sessionId=${who.sessionId}, cachedFrames=${this.renderBuffer[who.sessionId].length}`);
-            while (this.renderBuffer[who.sessionId].length > 0) {
-                const renderData = this.renderBuffer[who.sessionId].shift();
-                render(who.sessionId, renderData);
-            }
+            // console.log(`渲染请求: sessionId=${who.sessionId}, cachedFrames=${this.renderBuffer[who.sessionId].length}`);
+            // while (this.renderBuffer[who.sessionId].length > 0) {
+            //     const renderData = this.renderBuffer[who.sessionId].shift();
+            //     render(who.sessionId, renderData);
+            // }
+            render(who.sessionId, this.renderBuffer[who.sessionId]);
         });
     }
 
