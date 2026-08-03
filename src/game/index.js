@@ -32,25 +32,25 @@ class Game {
                 console.log(`Player added: sessionId=${sessionId}, uuid=${uuid}`);
                 const i = this.players[sessionId];
                 this.renderBuffer[sessionId] = [];
-                setInterval(() => {
-                    if (this.renderBuffer[sessionId].length > 2) return; // 如果渲染缓冲区过长，跳过本次渲染
-                    const startTime = Date.now();
-                    const otherPlayersData = [];
-                    for (const [id, player] of Object.entries(this.players)) {
-                        if (id !== sessionId) {
-                            otherPlayersData.push(player.remoteData());
-                        }
-                    }
-                    const selfRender = i.render(this.world.culling.bind(this.world));
-                    // render(sessionId, [...selfRender, ...otherPlayersData]);
-                    const data = [...selfRender, ...otherPlayersData];
-                    // this.renderBuffer[sessionId].push(data);
-                    render(sessionId, data);
-                    const endTime = Date.now();
-                    if (endTime - startTime > 50) {
-                        console.warn(`渲染耗时过长: ${endTime - startTime}ms`);
-                    }
-                }, 1000 / 20); // 每秒20帧
+                // setInterval(() => {
+                //     if (this.renderBuffer[sessionId].length > 2) return; // 如果渲染缓冲区过长，跳过本次渲染
+                //     const startTime = Date.now();
+                //     const otherPlayersData = [];
+                //     for (const [id, player] of Object.entries(this.players)) {
+                //         if (id !== sessionId) {
+                //             otherPlayersData.push(player.remoteData());
+                //         }
+                //     }
+                //     const selfRender = i.render(this.world.culling.bind(this.world));
+                //     // render(sessionId, [...selfRender, ...otherPlayersData]);
+                //     const data = [...selfRender, ...otherPlayersData];
+                //     // this.renderBuffer[sessionId].push(data);
+                //     render(sessionId, data);
+                //     const endTime = Date.now();
+                //     if (endTime - startTime > 50) {
+                //         console.warn(`渲染耗时过长: ${endTime - startTime}ms`);
+                //     }
+                // }, 1000 / 20); // 每秒20帧
                 return true;
             } catch (_) {
                 console.error(_);
@@ -87,6 +87,15 @@ class Game {
             // if (this.renderBuffer[who.sessionId].length !== 0) {
             //     renderBatch(who.sessionId, this.renderBuffer[who.sessionId]);
             // }
+            const startTime = Date.now();
+            const otherPlayersData = [];
+            for (const [id, player] of Object.entries(this.players)) {
+                if (id !== sessionId) {
+                    otherPlayersData.push(player.remoteData());
+                }
+            }
+            const selfRender = i.render(this.world.culling.bind(this.world));
+            render(sessionId, [...selfRender, ...otherPlayersData]);
         });
     }
 
