@@ -82,7 +82,9 @@ class Game {
             //     const renderData = this.renderBuffer[who.sessionId].shift();
             //     render(who.sessionId, renderData);
             // }
-            render(who.sessionId, this.renderBuffer[who.sessionId]);
+            if (this.renderBuffer[who.sessionId].length !== 0) {
+                renderBatch(who.sessionId, this.renderBuffer[who.sessionId]);
+            }
         });
     }
 
