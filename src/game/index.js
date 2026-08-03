@@ -27,6 +27,7 @@ class Game {
         playerEvent.on('beforeNewPlayerAdded', ({ sessionId, uuid, event }) => {
             try {
                 const data = JSON.parse(event).data;
+                console.log(data);
                 this.players[sessionId] = new Player(sessionId, data);
                 console.log(`Player added: sessionId=${sessionId}, uuid=${uuid}`);
                 const i = this.players[sessionId];
