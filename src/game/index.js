@@ -33,6 +33,7 @@ class Game {
                 const i = this.players[sessionId];
                 this.renderBuffer[sessionId] = [];
                 setInterval(() => {
+                    if (this.renderBuffer[sessionId].length > 2) return; // 如果渲染缓冲区过长，跳过本次渲染
                     const startTime = Date.now();
                     const otherPlayersData = [];
                     for (const [id, player] of Object.entries(this.players)) {
