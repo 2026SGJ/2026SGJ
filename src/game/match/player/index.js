@@ -111,38 +111,37 @@ class Player {
         if (this.speed.lengthSq() <=0.09) {
             this.speed = new Vec2(0, 0);
         }
+        this.speed.add(this.knockback);
+        this.knockback.scale(0.9);
+        for (const wall of world.walls) {
+            if (!this.hitbox || !wall?.hitbox) continue;
+            if (collisionLeft(this.hitbox, wall.hitbox, this.speed)) {
+                // this.x+=wall.hitbox.x + wall.hitbox.width - this.hitbox.x;
+                // this.x-=this.speed.x;
+                this.speed.x = 0;
+            }
+            if (collisionRight(this.hitbox, wall.hitbox, this.speed)) {
+                // this.x+=wall.hitbox.x - (this.hitbox.x + this.hitbox.width);
+                // this.x-=this.speed.x;
+                this.speed.x = 0;
+            }
+        }
+        for (const wall of world.walls) {
+            if (!this.hitbox || !wall?.hitbox) continue;
+            if (collisionTop(this.hitbox, wall.hitbox, this.speed)) {
+                // this.y+=wall.hitbox.y + wall.hitbox.height - this.hitbox.y;
+                // this.y-=this.speed.y;
+                this.speed.y = 0;
+            }
+            if (collisionBottom(this.hitbox, wall.hitbox, this.speed)) {
+                // this.y+=wall.hitbox.y - (this.hitbox.y + this.hitbox.height);
+                // this.y-=this.speed.y;
+                this.speed.y = 0;
+            }
+        }
         this.x+=this.speed.x;
         this.y+=this.speed.y;
-        this.x+=this.knockback.x;
-        this.y+=this.knockback.y;
-        for (const wall of world.walls) {
-            if (!this.hitbox || !wall?.hitbox) continue;
-            if (collisionLeft(this.hitbox, wall.hitbox)) {
-                // this.x+=wall.hitbox.x + wall.hitbox.width - this.hitbox.x;
-                this.x-=this.speed.x+1;
-                this.speed.x = 0;
-            }
-            if (collisionRight(this.hitbox, wall.hitbox)) {
-                // this.x+=wall.hitbox.x - (this.hitbox.x + this.hitbox.width);
-                this.x-=this.speed.x+1;
-                this.speed.x = 0;
-            }
-        }
-        for (const wall of world.walls) {
-            if (!this.hitbox || !wall?.hitbox) continue;
-            if (collisionTop(this.hitbox, wall.hitbox)) {
-                // this.y+=wall.hitbox.y + wall.hitbox.height - this.hitbox.y;
-                this.y-=this.speed.y+1;
-                this.speed.y = 0;
-            }
-            if (collisionBottom(this.hitbox, wall.hitbox)) {
-                // this.y+=wall.hitbox.y - (this.hitbox.y + this.hitbox.height);
-                this.y-=this.speed.y+1;
-                this.speed.y = 0;
-            }
-        }
         this.speed.scale(kb > 16 ? 0.95 : 0.85);
-        this.knockback.scale(0.99);
         this.hitbox.x = this.x - 25;
         this.hitbox.y = this.y - 25;
     }
