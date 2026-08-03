@@ -118,19 +118,23 @@ class Player {
         for (const wall of world.walls) {
             if (!this.hitbox || !wall?.hitbox) continue;
             if (collisionLeft(this.hitbox, wall.hitbox)) {
-                this.x+=wall.hitbox.x + wall.hitbox.width - this.hitbox.x;
+                // this.x+=wall.hitbox.x + wall.hitbox.width - this.hitbox.x;
+                this.x-=this.speed.x;
             }
             if (collisionRight(this.hitbox, wall.hitbox)) {
-                this.x+=wall.hitbox.x - (this.hitbox.x + this.hitbox.width);
+                // this.x+=wall.hitbox.x - (this.hitbox.x + this.hitbox.width);
+                this.x-=this.speed.x;
             }
         }
         for (const wall of world.walls) {
             if (!this.hitbox || !wall?.hitbox) continue;
             if (collisionTop(this.hitbox, wall.hitbox)) {
-                this.y+=wall.hitbox.y + wall.hitbox.height - this.hitbox.y;
+                // this.y+=wall.hitbox.y + wall.hitbox.height - this.hitbox.y;
+                this.y-=this.speed.y;
             }
             if (collisionBottom(this.hitbox, wall.hitbox)) {
-                this.y+=wall.hitbox.y - (this.hitbox.y + this.hitbox.height);
+                // this.y+=wall.hitbox.y - (this.hitbox.y + this.hitbox.height);
+                this.y-=this.speed.y;
             }
         }
         this.speed.scale(kb > 16 ? 0.95 : 0.85);
