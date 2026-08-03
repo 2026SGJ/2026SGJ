@@ -3,7 +3,7 @@ import playerEvent from '../sessions/index.js';
 import Player from './match/player/index.js';
 import World from './match/world.js';
 import room from '../network/index.js';
-import renderBatch from './render.js';
+import { render, renderBatch} from './render.js';
 
 /**
  * Game类
@@ -44,7 +44,8 @@ class Game {
                     const selfRender = i.render(this.world.culling.bind(this.world));
                     // render(sessionId, [...selfRender, ...otherPlayersData]);
                     const data = [...selfRender, ...otherPlayersData];
-                    this.renderBuffer[sessionId].push(data);
+                    // this.renderBuffer[sessionId].push(data);
+                    render(sessionId, data);
                     const endTime = Date.now();
                     if (endTime - startTime > 50) {
                         console.warn(`渲染耗时过长: ${endTime - startTime}ms`);
@@ -83,9 +84,9 @@ class Game {
             //     const renderData = this.renderBuffer[who.sessionId].shift();
             //     render(who.sessionId, renderData);
             // }
-            if (this.renderBuffer[who.sessionId].length !== 0) {
-                renderBatch(who.sessionId, this.renderBuffer[who.sessionId]);
-            }
+            // if (this.renderBuffer[who.sessionId].length !== 0) {
+            //     renderBatch(who.sessionId, this.renderBuffer[who.sessionId]);
+            // }
         });
     }
 
