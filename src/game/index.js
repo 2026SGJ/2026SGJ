@@ -27,14 +27,13 @@ class Game {
         playerEvent.on('beforeNewPlayerAdded', ({ sessionId, uuid, event }) => {
             try {
                 const data = JSON.parse(event).data;
-                console.log(data);
                 this.players[sessionId] = new Player(sessionId, data);
                 console.log(`Player added: sessionId=${sessionId}, uuid=${uuid}`);
                 const i = this.players[sessionId];
                 setInterval(() => {
                     const otherPlayersData = [];
                     for (const [id, player] of Object.entries(this.players)) {
-                        if (id !== who.sessionId) {
+                        if (id !== sessionId) {
                             otherPlayersData.push(player.remoteData());
                         }
                     }
