@@ -1,8 +1,8 @@
 import Entity from './entity.js';
 
 class Wall extends Entity {
-    constructor({ id, type, x, y, asset, isShowed, effects, isFixed, width, height }) {
-        super({ id, type, x, y, asset, isShowed, effects, width, height });
+    constructor({ id, type, x, y, asset, isShowed, effects, isFixed, width, height, dir }) {
+        super({ id, type, x, y, asset, isShowed, effects, width, height, dir });
         this.data.isFixed = false;
         this.hitbox = {
             type: 'rect',
