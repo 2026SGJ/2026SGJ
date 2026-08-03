@@ -48,7 +48,7 @@ class Game {
                     if (endTime - startTime > 50) {
                         console.warn(`渲染耗时过长: ${endTime - startTime}ms`);
                     }
-                }, 1000 / 60); // 每秒60帧
+                }, 1000 / 30); // 每秒30帧
                 return true;
             } catch (_) {
                 console.error(_);
@@ -77,6 +77,7 @@ class Game {
         room.onMessage('C2SUpdateRender', ({ who, msg }) => {
             const i = this.players[who.sessionId];
             if (!i) return;
+            console.log(`渲染请求: sessionId=${who.sessionId}, cachedFrames=${this.renderBuffer[who.sessionId].length}`);
             while (this.renderBuffer[who.sessionId].length > 0) {
                 const renderData = this.renderBuffer[who.sessionId].shift();
                 render(who.sessionId, renderData);
