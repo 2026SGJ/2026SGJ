@@ -18,4 +18,4 @@ const renderBatch = (playerId, renderDataBatch) => {
     room.send('S2CRenderBatch', JSON.stringify(packet));
 };
 
-export default { render, renderBatch };
+export { render, renderBatch };
