@@ -38,7 +38,7 @@ class Game {
                         }
                     }
                     const selfRender = i.render(this.world.culling.bind(this.world));
-                    render(who.sessionId, [...selfRender, ...otherPlayersData]);
+                    render(sessionId, [...selfRender, ...otherPlayersData]);
                 }, 1000 / 30); // 每秒30帧
                 return true;
             } catch (_) {
