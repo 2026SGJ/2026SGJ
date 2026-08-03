@@ -120,10 +120,12 @@ class Player {
             if (collisionLeft(this.hitbox, wall.hitbox)) {
                 // this.x+=wall.hitbox.x + wall.hitbox.width - this.hitbox.x;
                 this.x-=this.speed.x;
+                this.speed.x = 0;
             }
             if (collisionRight(this.hitbox, wall.hitbox)) {
                 // this.x+=wall.hitbox.x - (this.hitbox.x + this.hitbox.width);
                 this.x-=this.speed.x;
+                this.speed.x = 0;
             }
         }
         for (const wall of world.walls) {
@@ -131,10 +133,12 @@ class Player {
             if (collisionTop(this.hitbox, wall.hitbox)) {
                 // this.y+=wall.hitbox.y + wall.hitbox.height - this.hitbox.y;
                 this.y-=this.speed.y;
+                this.speed.y = 0;
             }
             if (collisionBottom(this.hitbox, wall.hitbox)) {
                 // this.y+=wall.hitbox.y - (this.hitbox.y + this.hitbox.height);
                 this.y-=this.speed.y;
+                this.speed.y = 0;
             }
         }
         this.speed.scale(kb > 16 ? 0.95 : 0.85);
