@@ -1,7 +1,7 @@
 const matchLoop= async (players, world) => {
     for(const i in players){
         (i=>{
-            i.tick(players);
+            i.tick(players, world);
         })(players[i]);
     }
 };

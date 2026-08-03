@@ -1,5 +1,6 @@
 import HERODATAS from '../../../assets/data/heros/index.js';
 import Vec2 from '../../../utils/vec2.js';
+import { collisionLeft, collisionRight, collisionTop, collisionBottom } from '../../../utils/collision.js';
 
 class Player {
     constructor(sessionId, data) {
@@ -11,7 +12,14 @@ class Player {
         this.knockback = new Vec2(0, 0);
         this.dx = 0;
         this.dy = 0;
-        this.hero = data.hero || 'cat';
+        this.hitbox = {
+            type: 'rect',
+            x: this.x - 25,
+            y: this.y - 25,
+            width: 50,
+            height: 50
+        };
+        this.hero = data.hero || 'newton';
         this.costume = 'empty';
         this.runAnimate = 0;
         this.attackForward = 0;
@@ -53,7 +61,7 @@ class Player {
             return 'idle';
         }
         // console.log(this.runAnimate);
-        this.runAnimate = (this.runAnimate + this.speed.length()/(1.41*this.args.speed)) % 3;
+        this.runAnimate = (this.runAnimate + this.speed.length()/(1.41421356*this.args.speed)) % this.args.animations.run.frames;
         return `run${Math.trunc(this.runAnimate)+1}`;
     }
 
@@ -96,7 +104,7 @@ class Player {
         })
     }
 
-    move() {
+    move(world) {
         const kb = this.knockback.lengthSq();
         if (this.dx && kb <= 16) this.speed.x = this.dx * this.args.speed;
         if (this.dy && kb <= 16) this.speed.y = this.dy * this.args.speed;
@@ -107,8 +115,26 @@ class Player {
         this.y+=this.speed.y;
         this.x+=this.knockback.x;
         this.y+=this.knockback.y;
+        for (const wall of world.walls) {
+            if (collisionLeft(this.hitbox, wall.hitbox)) {
+                this.x+=wall.hitbox.x + wall.hitbox.width - this.hitbox.x;
+            }
+            if (collisionRight(this.hitbox, wall.hitbox)) {
+                this.x+=wall.hitbox.x - (this.hitbox.x + this.hitbox.width);
+            }
+        }
+        for (const wall of world.walls) {
+            if (collisionTop(this.hitbox, wall.hitbox)) {
+                this.y+=wall.hitbox.y + wall.hitbox.height - this.hitbox.y;
+            }
+            if (collisionBottom(this.hitbox, wall.hitbox)) {
+                this.y+=wall.hitbox.y - (this.hitbox.y + this.hitbox.height);
+            }
+        }
         this.speed.scale(kb > 16 ? 0.95 : 0.85);
         this.knockback.scale(0.99);
+        this.hitbox.x = this.x - 25;
+        this.hitbox.y = this.y - 25;
     }
 
     findTarget(players) {
@@ -182,9 +208,9 @@ class Player {
         };
     }
 
-    tick(players) {
+    tick(players, world) {
         this.processEvents();
-        this.move();
+        this.move(world );
         this.processSkills(players);
         this.costume = `${this.hero}_${this.animate()}`;
     }

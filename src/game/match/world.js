@@ -7,6 +7,7 @@ class World {
     constructor({ map_id }) {
         this.map_id = map_id ?? null;
         this.entities = [];
+        this.walls = [];
         this.init();
     }
 
@@ -20,6 +21,13 @@ class World {
                 // 初始化标题实体
                 const titleEntity = new Title(entity);
                 this.entities.push(titleEntity);
+                continue;
+            }
+            if (entity.type === 'wall') {
+                // 初始化墙体实体
+                const wallEntity = new Entity(entity);
+                this.walls.push(wallEntity);
+                this.entities.push(wallEntity);
                 continue;
             }
             this.entities.push(new Entity(entity));

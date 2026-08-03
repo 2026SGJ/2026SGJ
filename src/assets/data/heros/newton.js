@@ -4,6 +4,11 @@ export default {
     description: '聚怪、强制位移、阵地战',
     health: 1200,
     speed: 7.25,
+    animations: {
+        run: {
+            frames: 2,
+        }
+    },
     attacks: {
         basic: {
             name: '惯性重击',

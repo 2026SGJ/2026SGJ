@@ -1,5 +1,5 @@
 class Entity {
-    constructor({ id, type, x, y, asset, dir, isShowed, effects }) {
+    constructor({ id, type, x, y, asset, dir, isShowed, effects, width, height }) {
         this.data = {
             id: id,
             type: type,
@@ -10,7 +10,9 @@ class Entity {
             isShowed: isShowed,
             color: effects?.color || 0,
             ghost: effects?.ghost || 0,
-            scale: effects?.scale || 100
+            scale: effects?.scale || 100,
+            width: width,
+            height: height
         };
     }
 
