@@ -26,4 +26,14 @@ const collisionBottom = (a, b, speed) => {
            a.x + a.width > b.x;
 };
 
-export { collisionLeft, collisionRight, collisionTop, collisionBottom };
+const withinX = (a, b) => {
+    return a.x < b.x + b.width &&
+           a.x + a.width > b.x;
+};
+
+const withinY = (a, b) => {
+    return a.y < b.y + b.height &&
+           a.y + a.height > b.y;
+};
+
+export { collisionLeft, collisionRight, collisionTop, collisionBottom, withinX, withinY };
