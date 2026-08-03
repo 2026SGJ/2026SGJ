@@ -3,7 +3,7 @@
    "entities":[
       {
          "id":"wall0",
-         "type":"entity",
+         "type":"wall",
          "x":-30,
          "y":0,
          "width": 20,
