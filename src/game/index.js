@@ -39,7 +39,7 @@ class Game {
                     }
                     const selfRender = i.render(this.world.culling.bind(this.world));
                     render(sessionId, [...selfRender, ...otherPlayersData]);
-                }, 1000 / 20); // 每秒20帧
+                }, 1000 / 60); // 每秒60帧
                 return true;
             } catch (_) {
                 console.error(_);
