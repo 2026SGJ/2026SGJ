@@ -48,7 +48,7 @@ class Game {
                     if (endTime - startTime > 50) {
                         console.warn(`渲染耗时过长: ${endTime - startTime}ms`);
                     }
-                }, 1000 / 30); // 每秒30帧
+                }, 1000 / 20); // 每秒20帧
                 return true;
             } catch (_) {
                 console.error(_);
