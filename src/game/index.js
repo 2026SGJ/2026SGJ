@@ -30,7 +30,7 @@ class Game {
                 this.players[sessionId] = new Player(sessionId, data);
                 console.log(`Player added: sessionId=${sessionId}, uuid=${uuid}`);
                 const i = this.players[sessionId];
-                setInterval(() => {
+                /*setInterval(() => {
                     const otherPlayersData = [];
                     for (const [id, player] of Object.entries(this.players)) {
                         if (id !== sessionId) {
@@ -39,7 +39,7 @@ class Game {
                     }
                     const selfRender = i.render(this.world.culling.bind(this.world));
                     render(sessionId, [...selfRender, ...otherPlayersData]);
-                }, 1000 / 30); // 每秒30帧
+                }, 1000 / 30);*/ // 每秒30帧
                 return true;
             } catch (_) {
                 console.error(_);
