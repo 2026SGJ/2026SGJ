@@ -15,6 +15,7 @@ class Game {
         this.matchLoop = null;
         this.players = {};  // sessionId → Player
         this.world = null;
+        this.renderBuffer = {};  // sessionId → Array<RenderData>
         this.init();
     }
 
@@ -30,16 +31,23 @@ class Game {
                 this.players[sessionId] = new Player(sessionId, data);
                 console.log(`Player added: sessionId=${sessionId}, uuid=${uuid}`);
                 const i = this.players[sessionId];
-                // setInterval(() => {
-                //     const otherPlayersData = [];
-                //     for (const [id, player] of Object.entries(this.players)) {
-                //         if (id !== sessionId) {
-                //             otherPlayersData.push(player.remoteData());
-                //         }
-                //     }
-                //     const selfRender = i.render(this.world.culling.bind(this.world));
-                //     render(sessionId, [...selfRender, ...otherPlayersData]);
-                // }, 1000 / 60); // 每秒60帧
+                this.renderBuffer[sessionId] = [];
+                setInterval(() => {
+                    const startTime = Date.now();
+                    const otherPlayersData = [];
+                    for (const [id, player] of Object.entries(this.players)) {
+                        if (id !== sessionId) {
+                            otherPlayersData.push(player.remoteData());
+                        }
+                    }
+                    const selfRender = i.render(this.world.culling.bind(this.world));
+                    // render(sessionId, [...selfRender, ...otherPlayersData]);
+                    this.renderBuffer[sessionId].push(...selfRender, ...otherPlayersData);
+                    const endTime = Date.now();
+                    if (endTime - startTime > 50) {
+                        console.warn(`渲染耗时过长: ${endTime - startTime}ms`);
+                    }
+                }, 1000 / 30); // 每秒30帧
                 return true;
             } catch (_) {
                 console.error(_);
@@ -68,19 +76,9 @@ class Game {
         room.onMessage('C2SUpdateRender', ({ who, msg }) => {
             const i = this.players[who.sessionId];
             if (!i) return;
-            // 收集其他玩家的远程数据
-            const startTime = Date.now();
-            const otherPlayersData = [];
-            for (const [id, player] of Object.entries(this.players)) {
-                if (id !== who.sessionId) {
-                    otherPlayersData.push(player.remoteData());
-                }
-            }
-            const selfRender = i.render(this.world.culling.bind(this.world));
-            render(who.sessionId, [...selfRender, ...otherPlayersData]);
-            const endTime = Date.now();
-            if (endTime - startTime > 50) {
-                console.warn(`渲染数据收集耗时过长: ${endTime - startTime}ms`);
+            while (this.renderBuffer[who.sessionId].length > 0) {
+                const renderData = this.renderBuffer[who.sessionId].shift();
+                render(who.sessionId, renderData);
             }
         });
     }
