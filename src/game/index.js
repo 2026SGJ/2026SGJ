@@ -90,12 +90,12 @@ class Game {
             const startTime = Date.now();
             const otherPlayersData = [];
             for (const [id, player] of Object.entries(this.players)) {
-                if (id !== sessionId) {
+                if (id !== who.sessionId) {
                     otherPlayersData.push(player.remoteData());
                 }
             }
             const selfRender = i.render(this.world.culling.bind(this.world));
-            render(sessionId, [...selfRender, ...otherPlayersData]);
+            render(who.sessionId, [...selfRender, ...otherPlayersData]);
         });
     }
 
