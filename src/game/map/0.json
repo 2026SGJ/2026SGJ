@@ -4,7 +4,7 @@
       {
          "id":"wall0",
          "type":"wall",
-         "x":-30,
+         "x":-60,
          "y":0,
          "width": 20,
          "height": 200,
