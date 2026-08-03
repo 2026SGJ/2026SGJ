@@ -69,6 +69,7 @@ class Game {
             const i = this.players[who.sessionId];
             if (!i) return;
             // 收集其他玩家的远程数据
+            const startTime = Date.now();
             const otherPlayersData = [];
             for (const [id, player] of Object.entries(this.players)) {
                 if (id !== who.sessionId) {
@@ -77,6 +78,10 @@ class Game {
             }
             const selfRender = i.render(this.world.culling.bind(this.world));
             render(who.sessionId, [...selfRender, ...otherPlayersData]);
+            const endTime = Date.now();
+            if (endTime - startTime > 50) {
+                console.warn(`渲染数据收集耗时过长: ${endTime - startTime}ms`);
+            }
         });
     }
 
