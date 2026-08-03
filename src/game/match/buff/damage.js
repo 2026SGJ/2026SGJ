@@ -1,13 +1,16 @@
 import Buff from './buff.js';
 
+/**
+ * DamageBuff — 持续伤害（debuff）
+ * 每 tick 对拥有者造成 level 点伤害
+ */
 class DamageBuff extends Buff {
     constructor(data) {
         super(data);
-        // this.level = data.level; // 每秒伤害点数
     }
 
-    onTick(player) {
-        // 在每个 tick 中应用伤害提升效果
+    tick(player) {
+        // 每 tick 对目标玩家造成持续伤害
         player.takeDamage(this.level);
     }
 }
