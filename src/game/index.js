@@ -42,7 +42,8 @@ class Game {
                     }
                     const selfRender = i.render(this.world.culling.bind(this.world));
                     // render(sessionId, [...selfRender, ...otherPlayersData]);
-                    this.renderBuffer[sessionId].push(...selfRender, ...otherPlayersData);
+                    const data = [...selfRender, ...otherPlayersData];
+                    this.renderBuffer[sessionId].push(data);
                     const endTime = Date.now();
                     if (endTime - startTime > 50) {
                         console.warn(`渲染耗时过长: ${endTime - startTime}ms`);
