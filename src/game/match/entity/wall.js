@@ -1,4 +1,4 @@
-import Entity from '../entity.js';
+import Entity from './entity.js';
 
 class Wall extends Entity {
     constructor({ id, type, x, y, asset, isShowed, effects, isFixed, width, height }) {
