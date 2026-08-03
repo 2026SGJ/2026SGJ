@@ -30,7 +30,7 @@ class Game {
                 this.players[sessionId] = new Player(sessionId, data);
                 console.log(`Player added: sessionId=${sessionId}, uuid=${uuid}`);
                 const i = this.players[sessionId];
-                /*setInterval(() => {
+                setInterval(() => {
                     const otherPlayersData = [];
                     for (const [id, player] of Object.entries(this.players)) {
                         if (id !== sessionId) {
@@ -39,7 +39,7 @@ class Game {
                     }
                     const selfRender = i.render(this.world.culling.bind(this.world));
                     render(sessionId, [...selfRender, ...otherPlayersData]);
-                }, 1000 / 30);*/ // 每秒30帧
+                }, 1000 / 20); // 每秒20帧
                 return true;
             } catch (_) {
                 console.error(_);
@@ -65,7 +65,7 @@ class Game {
         });
 
         // 渲染请求（dest 使用 sessionId）
-        room.onMessage('C2SUpdateRender', ({ who, msg }) => {
+        /*room.onMessage('C2SUpdateRender', ({ who, msg }) => {
             const i = this.players[who.sessionId];
             if (!i) return;
             // 收集其他玩家的远程数据
@@ -77,7 +77,7 @@ class Game {
             }
             const selfRender = i.render(this.world.culling.bind(this.world));
             render(who.sessionId, [...selfRender, ...otherPlayersData]);
-        });
+        });*/
     }
 
     end() {
