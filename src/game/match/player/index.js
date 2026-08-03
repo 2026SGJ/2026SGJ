@@ -213,7 +213,8 @@ class Player {
             dir: this.dir,
             state: {
                 health: this.health,
-            }
+            },
+            fz: 1
         };
     }
 
