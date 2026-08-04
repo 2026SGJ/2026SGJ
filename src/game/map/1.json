@@ -98,6 +98,32 @@
          "z_index": 2
       },
       {
+         "id": "shop_base_B",
+         "type": "shop",
+         "team": "B",
+         "x": 1480,
+         "y": 360,
+         "width": 60,
+         "height": 60,
+         "asset": "shop_B",
+         "scale": 100,
+         "isShowed": true,
+         "dir": 0
+      },
+      {
+         "id": "shop_base_A",
+         "type": "shop",
+         "team": "A",
+         "x": 1480,
+         "y": 6840,
+         "width": 60,
+         "height": 60,
+         "asset": "shop_A",
+         "scale": 100,
+         "isShowed": true,
+         "dir": 0
+      },
+      {
          "id": "wall_base_B_left",
          "type": "wall",
          "x": 1040,

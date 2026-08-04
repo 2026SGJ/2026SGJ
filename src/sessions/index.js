@@ -151,6 +151,48 @@ room.onMessage('C2SUseItem', (message) => {
     }
     const uuid = message.who.extra.uuid;
     playerEvent.trigger('useItem', { sessionId, uuid, event: message.msg });
+//  C2SShopBuy — 商店购买请求
+// ============================================================
+room.onMessage('C2SShopBuy', (message) => {
+    const sessionId = message.who.sessionId;
+
+    if (!activeSessions.has(sessionId)) {
+        console.log(`C2SShopBuy from unknown session ${sessionId} ignored.`);
+        return;
+    }
+
+    const uuid = message.who.extra.uuid;
+    playerEvent.trigger('shopBuy', { sessionId, uuid, event: message.msg });
+});
+
+// ============================================================
+//  C2SShopOpen — 商店打开请求
+// ============================================================
+room.onMessage('C2SShopOpen', (message) => {
+    const sessionId = message.who.sessionId;
+
+    if (!activeSessions.has(sessionId)) {
+        console.log(`C2SShopOpen from unknown session ${sessionId} ignored.`);
+        return;
+    }
+
+    const uuid = message.who.extra.uuid;
+    playerEvent.trigger('shopOpen', { sessionId, uuid, event: message.msg });
+});
+
+// ============================================================
+//  C2SShopClose — 商店关闭请求
+// ============================================================
+room.onMessage('C2SShopClose', (message) => {
+    const sessionId = message.who.sessionId;
+
+    if (!activeSessions.has(sessionId)) {
+        console.log(`C2SShopClose from unknown session ${sessionId} ignored.`);
+        return;
+    }
+
+    const uuid = message.who.extra.uuid;
+    playerEvent.trigger('shopClose', { sessionId, uuid, event: message.msg });
 });
 
 room.onStateChange((newState) => {
