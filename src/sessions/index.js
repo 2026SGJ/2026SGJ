@@ -129,5 +129,14 @@ room.onMessage('C2STouchEvent', (message) => {
 
 room.onStateChange((newState) => {
     // playerEvent.trigger('stateChange', { newState });
-    console.log(`Room state changed: `, newState.players);
+    // console.log(`Room state changed: `, newState.players);
+    newState.players.forEach((player, sessionId) => {
+        console.log(`State change for session ${sessionId}: `, player);
+        if (!activeSessions.has(sessionId)) {
+            console.log(`State change for unknown session ${sessionId} ignored.`);
+            return;
+        }
+        const uuid = player.uuid;
+        // playerEvent.trigger('stateChange', { sessionId, uuid, event: player });
+    });
 });

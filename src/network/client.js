@@ -34,7 +34,7 @@ class GameState extends Schema {
 }
 type("number")(GameState.prototype, "onlineCount");
 type("string")(GameState.prototype, "extra");
-type("number")(GameState.prototype, "refId");
+type("number")(GameState.prototype, "~refId");
 type({ map: Player })(GameState.prototype, "players");
 
 const joinRoom = async (server, roomType, projectId, roomId, auth) => {
