@@ -3,6 +3,11 @@ import DamageBuff from '../buff/damage.js';
 import FreezeBuff from '../buff/freeze.js';
 import StrengthBuff from '../buff/strength.js';
 import ReboundBuff from '../buff/rebound.js';
+import StunBuff from '../buff/stun.js';
+import SpeedBuff from '../buff/speed.js';
+import ShieldBuff from '../buff/shield.js';
+import PoisonBuff from '../buff/poison.js';
+import InvisibleBuff from '../buff/invisible.js';
 
 /**
  * Buff 类型注册表
@@ -13,6 +18,11 @@ const BUFF_CLASS_MAP = {
     'freeze': FreezeBuff,
     'strength': StrengthBuff,
     'rebound': ReboundBuff,
+    'stun': StunBuff,
+    'speed': SpeedBuff,
+    'shield': ShieldBuff,
+    'poison': PoisonBuff,
+    'invisible': InvisibleBuff,
 };
 
 const getBuffClassById = (id) => {

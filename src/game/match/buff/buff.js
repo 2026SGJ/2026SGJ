@@ -21,6 +21,14 @@ class Buff {
     }
 
     /**
+     * 获取剩余持续时间（毫秒）
+     * @returns {number}
+     */
+    getRemainingTime() {
+        return Math.max(0, this.duration - (Date.now() - this.startTime));
+    }
+
+    /**
      * 每 tick 调用一次
      * 子类可以重写此方法以实现每帧效果（如持续伤害）
      * @param {import('../player/index.js').default} player - 拥有此 buff 的玩家

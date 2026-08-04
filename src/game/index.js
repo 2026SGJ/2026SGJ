@@ -4,6 +4,7 @@ import Player from './match/player/index.js';
 import World from './match/world.js';
 import room from '../network/index.js';
 import { render, renderBatch} from './render.js';
+import Shop from './match/item/shop.js';
 
 /**
  * Game类
@@ -23,7 +24,15 @@ class Game {
         // 初始化游戏
         console.log('游戏初始化');
         this.world = new World({ map_id: '1' });
-        this.matchLoop = setInterval(_=>matchLoop(this.players, this.world), 1000 / 20); // 每秒20 Ticks
+        Shop.resetStock();   // 重置商店库存
+        // 主循环：每 tick 更新玩家和世界，随后同步物品栏
+        this.matchLoop = setInterval(() => {
+            matchLoop(this.players, this.world);
+            // 同步所有玩家的物品栏（仅在变动时发送）
+            for (const sessionId of Object.keys(this.players)) {
+                this._syncInventory(sessionId);
+            }
+        }, 1000 / 20); // 每秒20 Ticks
 
         playerEvent.on('beforeNewPlayerAdded', ({ sessionId, uuid, event }) => {
             try {
@@ -97,6 +106,87 @@ class Game {
             } catch (_) {}
         });
 
+        // ---------- 道具购买 ----------
+        playerEvent.on('buyItem', ({ sessionId, uuid, event }) => {
+            const player = this.players[sessionId];
+            if (!player) return;
+            try {
+                const data = JSON.parse(event).data;
+                const itemId = data.itemId;
+                if (!itemId) {
+                    room.send('S2CBuyItem', JSON.stringify({
+                        dest: sessionId, seq: 0,
+                        data: { success: false, reason: '缺少 itemId 参数' }
+                    }));
+                    return;
+                }
+
+                const result = Shop.buy(player, itemId);
+                room.send('S2CBuyItem', JSON.stringify({
+                    dest: sessionId, seq: 0,
+                    data: result
+                }));
+
+                // 购买成功后立即同步物品栏
+                if (result.success) {
+                    this._syncInventory(sessionId);
+                }
+            } catch (err) {
+                console.error('[BuyItem] Error:', err);
+                room.send('S2CBuyItem', JSON.stringify({
+                    dest: sessionId, seq: 0,
+                    data: { success: false, reason: '服务器内部错误' }
+                }));
+            }
+        });
+
+        // ---------- 道具使用（网络消息） ----------
+        playerEvent.on('useItem', ({ sessionId, uuid, event }) => {
+            const player = this.players[sessionId];
+            if (!player) return;
+            try {
+                const data = JSON.parse(event).data;
+                const itemId = data.itemId;
+                if (!itemId) {
+                    room.send('S2CUseItem', JSON.stringify({
+                        dest: sessionId, seq: 0,
+                        data: { success: false, reason: '缺少 itemId 参数' }
+                    }));
+                    return;
+                }
+
+                const success = player.useItem(itemId, {
+                    world: this.world,
+                    players: this.players
+                });
+
+                room.send('S2CUseItem', JSON.stringify({
+                    dest: sessionId, seq: 0,
+                    data: { success, itemId }
+                }));
+
+                // 使用后立即同步物品栏
+                if (success) {
+                    this._syncInventory(sessionId);
+                }
+            } catch (err) {
+                console.error('[UseItem] Error:', err);
+                room.send('S2CUseItem', JSON.stringify({
+                    dest: sessionId, seq: 0,
+                    data: { success: false, reason: '服务器内部错误' }
+                }));
+            }
+        });
+
+        // ---------- 商店列表查询 ----------
+        room.onMessage('C2SShopList', ({ who, msg }) => {
+            const sessionId = who.sessionId;
+            room.send('S2CShopList', JSON.stringify({
+                dest: sessionId, seq: 0,
+                data: { items: Shop.getShopList() }
+            }));
+        });
+
         // 渲染请求（dest 使用 sessionId）
         room.onMessage('C2SUpdateRender', ({ who, msg }) => {
             const i = this.players[who.sessionId];
@@ -119,6 +209,29 @@ class Game {
             const selfRender = i.render(this.world.culling.bind(this.world));
             render(who.sessionId, [...selfRender, ...otherPlayersData]);
         });
+    }
+
+    /**
+     * 向客户端发送物品栏同步 (S2CInv)
+     * 仅在物品栏发生变化时调用（增量同步）
+     * @param {string} sessionId
+     */
+    _syncInventory(sessionId) {
+        const player = this.players[sessionId];
+        if (!player || !player.inventory) return;
+
+        const inv = player.inventory;
+        if (!inv.changed) return;
+
+        room.send('S2CInv', JSON.stringify({
+            dest: sessionId,
+            seq: 0,
+            data: {
+                items: inv.serialize(),
+                money: player.money,
+            }
+        }));
+        inv.markSynchronized();
     }
 
     end() {

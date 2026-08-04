@@ -127,6 +127,32 @@ room.onMessage('C2STouchEvent', (message) => {
     playerEvent.trigger('touchEvent', { sessionId, uuid, event: message.msg });
 });
 
+// ============================================================
+//  C2SBuyItem — 购买道具请求
+// ============================================================
+room.onMessage('C2SBuyItem', (message) => {
+    const sessionId = message.who.sessionId;
+    if (!activeSessions.has(sessionId)) {
+        console.log(`C2SBuyItem from unknown session ${sessionId} ignored.`);
+        return;
+    }
+    const uuid = message.who.extra.uuid;
+    playerEvent.trigger('buyItem', { sessionId, uuid, event: message.msg });
+});
+
+// ============================================================
+//  C2SUseItem — 使用道具请求
+// ============================================================
+room.onMessage('C2SUseItem', (message) => {
+    const sessionId = message.who.sessionId;
+    if (!activeSessions.has(sessionId)) {
+        console.log(`C2SUseItem from unknown session ${sessionId} ignored.`);
+        return;
+    }
+    const uuid = message.who.extra.uuid;
+    playerEvent.trigger('useItem', { sessionId, uuid, event: message.msg });
+});
+
 room.onStateChange((newState) => {
     // playerEvent.trigger('stateChange', { newState });
     // console.log(`Room state changed: `, newState.players);

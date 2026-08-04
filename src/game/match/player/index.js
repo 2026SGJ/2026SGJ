@@ -3,6 +3,17 @@ import Vec2 from '../../../utils/vec2.js';
 import { collisionLeft, collisionRight, collisionTop, collisionBottom } from '../../../utils/collision.js';
 import Skill from '../skills/skill.js';
 import getBuffClassById from '../buff/index.js';
+import Inventory from '../item/inventory.js';
+import { ITEM_CONFIG } from '../item/itemConfig.js';
+import BombEntity from '../item/bomb.js';
+import FireballEntity from '../item/fireball.js';
+import LandmineEntity from '../item/landmine.js';
+import FragGrenadeEntity from '../item/fragGrenade.js';
+import FlashBangEntity from '../item/flashBang.js';
+import SmokeGrenadeEntity from '../item/smokeGrenade.js';
+import PoisonDartEntity from '../item/poisonDart.js';
+import FreezeTrapEntity from '../item/freezeTrap.js';
+import HealingTotemEntity from '../item/healingTotem.js';
 
 /**
  * Player — 玩家实体
@@ -89,6 +100,31 @@ class Player {
         this.health = this.args.health;
         this.maxHealth = this.args.health;
         this.buffs = [];
+
+        // ---------- 物品栏系统 ----------
+        /** @type {Inventory} 玩家物品栏实例 */
+        this.inventory = new Inventory(sessionId);
+        // ---------- 物品栏系统 ----------
+
+        // ---------- Buff/Debuff 状态标志 ----------
+        /** @type {boolean} 是否被眩晕（无法移动和攻击） */
+        this.stunned = false;
+        /** @type {number} 当前护盾值（吸收伤害） */
+        this.shield = 0;
+        /** @type {number} 移动速度倍率（1.0 = 正常速度，由 SpeedBuff 设置） */
+        this.speedMultiplier = 1.0;
+        /** @type {number} 被减速的比例（由烟雾弹等设置，0 = 无减速，0.4 = 减速 40%） */
+        this.slowAmount = 0;
+        /** @type {boolean} 是否隐形（客户端据此隐藏模型） */
+        this.invisible = false;
+        /** @type {number} 伤害减免比例（0~1，由 InvisibleBuff 设置） */
+        this.damageReduction = 0;
+        /** @type {boolean} 是否被禁止攻击（隐形时） */
+        this.cantAttack = false;
+        // ---------- Buff/Debuff 状态标志 ----------
+
+        /** @type {Vec2} 上一次移动方向（用于道具发射方向） */
+        this.lastMoveDir = new Vec2(this.dir > 0 ? 1 : -1, 0);
 
         // ---------- 技能实例 ----------
         this.skills = {
@@ -189,6 +225,12 @@ class Player {
         const key = this.heldKeys || [];
         const prevKey = this.prevHeldKeys || [];
 
+        // ---- 眩晕状态下跳过所有输入 ----
+        if (this.stunned) {
+            this.prevHeldKeys = [...key];
+            return;
+        }
+
         // ---- 单次触发的按键（仅在首次按下时触发） ----
         // C 键：切换技能（仅在新按下时触发，防止每 tick 反复切换）
         if (key.includes('KeyC') && !prevKey.includes('KeyC')) {
@@ -201,6 +243,16 @@ class Player {
                     `[Skill] ${this.sessionId} switched to skill ${this.selectedSkill} ` +
                     `(${this.getSkillData(this.selectedSkill)?.name || 'unknown'})`
                 );
+            }
+        }
+
+        // ---- 道具快捷键（数字键 1-0 对应物品栏 1-10 号位） ----
+        const digitKeys = ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5',
+                          'Digit6', 'Digit7', 'Digit8', 'Digit9', 'Digit0'];
+        for (let slotIdx = 0; slotIdx < digitKeys.length; slotIdx++) {
+            const dk = digitKeys[slotIdx];
+            if (key.includes(dk) && !prevKey.includes(dk)) {
+                this._useItemBySlot(slotIdx);
             }
         }
 
@@ -221,8 +273,8 @@ class Player {
                     this.dir = 90;
                     break;
                 case 'KeyR':
-                    // 普攻 — 仅在未释放技能时允许
-                    if (!this.usingSkill && this.isBasicReady()) {
+                    // 普攻 — 仅在未释放技能且未被禁止攻击时允许
+                    if (!this.usingSkill && !this.cantAttack && this.isBasicReady()) {
                         this.attacking = true;
                         if (!wasAttacking) {
                             this.attackForward = this.args.attacks.basic.forward || 0;
@@ -230,8 +282,8 @@ class Player {
                     }
                     break;
                 case 'KeyF':
-                    // 释放当前选中技能 — 仅在未攻击时允许
-                    if (!this.attacking && !this.usingSkill) {
+                    // 释放当前选中技能 — 仅在未攻击且未被禁止攻击时允许
+                    if (!this.attacking && !this.usingSkill && !this.cantAttack) {
                         const skillKey = `skill${this.selectedSkill}`;
                         if (this.isSkillReady(this.selectedSkill)) {
                             const skillData = this.args.attacks[skillKey];
@@ -400,15 +452,23 @@ class Player {
     // ---------- 移动 ----------
 
     move(world) {
-        // 开采期间或技能前摇期间禁止移动，同时刹车惯性速度
-        if (this.mining || this.usingSkill) {
+        // 开采期间或技能前摇期间或眩晕期间禁止移动，同时刹车惯性速度
+        if (this.mining || this.usingSkill || this.stunned) {
             this.speed.set(0, 0);
             return;
         }
 
+        // 计算最终速度倍率：SpeedBuff 乘数 × (1 - 烟雾减速)
+        const speedMult = this.speedMultiplier * (1 - (this.slowAmount || 0));
+
         const kb = this.knockback.lengthSq();
-        if (this.dx && kb <= 16) this.speed.x = this.dx * this.args.speed;
-        if (this.dy && kb <= 16) this.speed.y = this.dy * this.args.speed;
+        if (this.dx && kb <= 16) this.speed.x = this.dx * this.args.speed * speedMult;
+        if (this.dy && kb <= 16) this.speed.y = this.dy * this.args.speed * speedMult;
+
+        // 记录移动方向（用于道具发射）
+        if (this.speed.lengthSq() > 0.01) {
+            this.lastMoveDir = this.speed.normalized().clone();
+        }
         if (this.speed.lengthSq() <= 0.09) {
             this.speed = new Vec2(0, 0);
         }
@@ -598,6 +658,13 @@ class Player {
         // 重置 buff 叠加属性（会在 tick 中被重新设置）
         this._strengthMultiplier = 1.0;
         this._reboundPercent = 0;
+        this.stunned = false;
+        this.invisible = false;
+        this.cantAttack = false;
+        this.speedMultiplier = 1.0;
+        this.slowAmount = 0;
+        // 注意：damageReduction 在 InvisibleBuff 的 tick 中设置，这里不重置
+        // shield 由 ShieldBuff 的 onExpire 管理，这里不重置
 
         for (const buff of this.buffs) {
             if (buff.isExpired()) {
@@ -663,6 +730,13 @@ class Player {
                     level: b.level,
                     remaining: b.getRemainingTime(),
                 })),
+                // 新增道具/物品栏相关状态
+                inventory: this.inventory ? this.inventory.serialize() : [],
+                shield: this.shield || 0,
+                invisible: this.invisible || false,
+                stunned: this.stunned || false,
+                channelingTeleport: this.inventory ? this.inventory.isChannelingTeleport : false,
+                teleportRemaining: this.inventory ? this.inventory.teleportChannelRemaining : 0,
             },
             fz: 1,
             "z-index": 1000
@@ -680,6 +754,11 @@ class Player {
      */
     tick(players, world) {
         this.dx = this.dy = 0;
+
+        // 存储 world 和 players 引用，供键盘快捷键使用道具时使用
+        this._worldRef = world;
+        this._playersRef = players;
+
         this.processEvents();
         this.processKeyholding();
         this.updateMiningProximity(world);
@@ -687,6 +766,7 @@ class Player {
         this.move(world);
         this.processSkills(players);
         this.processBuffs();
+        this.processTeleportChannel();   // 回城卷轴引导
         this.costume = `${this.hero}_${this.animate()}`;
     }
 
@@ -709,13 +789,34 @@ class Player {
 
     /**
      * 受到伤害
+     * 处理顺序：护盾吸收 → 伤害减免 → 反弹 → 扣除生命
      * @param {number} amount - 伤害值
      * @param {Player} [attacker] - 攻击者（用于反弹计算）
      */
     takeDamage(amount, attacker) {
-        // 反弹伤害：将 _reboundPercent 比例的伤害返回给攻击者
-        if (attacker && this._reboundPercent > 0 && amount > 0) {
-            const reflected = amount * this._reboundPercent;
+        let finalAmount = amount;
+
+        // ----- 护盾吸收 -----
+        if (this.shield > 0 && finalAmount > 0) {
+            const absorbed = Math.min(this.shield, finalAmount);
+            this.shield -= absorbed;
+            finalAmount -= absorbed;
+            if (absorbed > 0) {
+                console.log(
+                    `[Combat] ${this.sessionId} 护盾吸收了 ${absorbed} 伤害, ` +
+                    `剩余护盾: ${this.shield}`
+                );
+            }
+        }
+
+        // ----- 伤害减免（隐形等） -----
+        if (this.damageReduction > 0 && finalAmount > 0) {
+            finalAmount = Math.round(finalAmount * (1 - this.damageReduction));
+        }
+
+        // ----- 反弹伤害 -----
+        if (attacker && this._reboundPercent > 0 && finalAmount > 0) {
+            const reflected = finalAmount * this._reboundPercent;
             if (reflected > 0) {
                 attacker.takeDamage(Math.round(reflected));
                 console.log(
@@ -725,7 +826,8 @@ class Player {
             }
         }
 
-        this.health -= amount;
+        // ----- 扣除生命 -----
+        this.health -= finalAmount;
         if (this.health <= 0) {
             this.health = 0;
             console.log(`Player ${this.sessionId} has died.`);
@@ -749,6 +851,16 @@ class Player {
         this.buffs = [];
         this._strengthMultiplier = 1.0;
         this._reboundPercent = 0;
+        this.stunned = false;
+        this.shield = 0;
+        this.speedMultiplier = 1.0;
+        this.slowAmount = 0;
+        this.invisible = false;
+        this.cantAttack = false;
+        this.damageReduction = 0;
+        // 死亡不清空物品栏（保留道具）
+        // 如果希望死亡掉落，可取消下面注释：
+        // this.inventory.clear();
     }
 
     giveBuff(buff) {
@@ -760,6 +872,221 @@ class Player {
 
     takeKnockback(knockbackVector) {
         this.knockback.add(knockbackVector);
+    }
+
+    // ======================== 道具使用系统 ========================
+
+    /**
+     * 获取玩家面朝方向（单位向量）
+     * 优先使用最近一次移动方向，其次根据 dir 判断左右
+     * @returns {Vec2}
+     */
+    getFacingDirection() {
+        if (this.lastMoveDir && this.lastMoveDir.lengthSq() > 0.001) {
+            return this.lastMoveDir.clone();
+        }
+        // 静止时根据 dir 判断：90 = 右, -90 = 左
+        return new Vec2(this.dir > 0 ? 1 : -1, 0);
+    }
+
+    /**
+     * 通过物品栏槽位使用道具（快捷键 1-0 触发）
+     * @param {number} slotIndex - 槽位索引 0-9
+     * @returns {boolean} 是否成功使用
+     */
+    _useItemBySlot(slotIndex) {
+        const sortedItems = this.inventory.serialize();
+        if (slotIndex >= sortedItems.length) return false;
+
+        const itemData = sortedItems[slotIndex];
+        if (!itemData || itemData.count <= 0) return false;
+
+        return this.useItem(itemData.itemId);
+    }
+
+    /**
+     * 使用指定道具
+     * @param {string} itemId - 道具 ID
+     * @param {Object} [options] - 可选参数
+     * @param {import('../world.js').default} [options.world]
+     * @param {Object<string, Player>} [options.players]
+     * @returns {boolean} 是否成功使用
+     */
+    useItem(itemId, options = {}) {
+        const config = ITEM_CONFIG[itemId];
+        if (!config) {
+            console.warn(`[ItemUse] ${this.sessionId}: 未知道具 ${itemId}`);
+            return false;
+        }
+
+        if (this.inventory.count(itemId) <= 0) {
+            console.log(`[ItemUse] ${this.sessionId}: 没有道具 ${config.name}`);
+            return false;
+        }
+
+        if (!this.inventory.usesCooledDown(itemId)) {
+            const remaining = this.inventory.getItemCdRemaining(itemId);
+            console.log(`[ItemUse] ${this.sessionId}: 道具 ${config.name} 冷却中, 剩余 ${remaining}ms`);
+            return false;
+        }
+
+        let success = false;
+        // 若未传入 world/players，使用 tick 中存储的引用
+        const effectiveWorld = world || this._worldRef;
+        const effectivePlayers = players || this._playersRef;
+
+        switch (config.type) {
+            case 'consumable': success = this._useConsumable(config); break;
+            case 'placeable': success = this._usePlaceable(config, effectiveWorld); break;
+            case 'projectile': success = this._useProjectile(config, effectiveWorld); break;
+            case 'utility': success = this._useUtility(config); break;
+            default:
+                console.warn(`[ItemUse] 未知道具类型: ${config.type}`);
+                return false;
+        }
+
+        if (success) {
+            this.inventory.remove(itemId, 1);
+            this.inventory.setItemCooldown(itemId);
+            console.log(`[ItemUse] ${this.sessionId} 使用了 ${config.name}, 剩余 ${this.inventory.count(itemId)} 个`);
+        }
+
+        return success;
+    }
+
+    /**
+     * 使用消耗品：直接治疗
+     * @private
+     */
+    _useConsumable(config) {
+        const healAmount = config.data.healAmount || 0;
+        if (healAmount <= 0) return false;
+        const oldHealth = this.health;
+        this.health = Math.min(this.maxHealth, this.health + healAmount);
+        console.log(`[ItemUse] ${this.sessionId} 使用 ${config.name}, 回复 ${this.health - oldHealth} HP (${this.health}/${this.maxHealth})`);
+        return true;
+    }
+
+    /**
+     * 使用放置物：在脚下创建道具实体
+     * @private
+     */
+    _usePlaceable(config, world) {
+        if (!world) { console.warn(`[ItemUse] _usePlaceable 需要 world 参数`); return false; }
+        const data = config.data;
+        let entity = null;
+        switch (config.id) {
+            case 'bomb': entity = new BombEntity(this.x, this.y, data, this.sessionId); break;
+            case 'landmine': entity = new LandmineEntity(this.x, this.y, data, this.sessionId, this.team); break;
+            case 'fragGrenade': entity = new FragGrenadeEntity(this.x, this.y, data, this.sessionId); break;
+            case 'smokeGrenade': entity = new SmokeGrenadeEntity(this.x, this.y, data, this.sessionId, this.team); break;
+            case 'freezeTrap': entity = new FreezeTrapEntity(this.x, this.y, data, this.sessionId, this.team); break;
+            case 'healingTotem': entity = new HealingTotemEntity(this.x, this.y, data, this.sessionId, this.team); break;
+            default: console.warn(`[ItemUse] 未处理的放置物类型: ${config.id}`); return false;
+        }
+        if (entity) {
+            world.addItemEntity(entity);
+            console.log(`[ItemUse] ${this.sessionId} 放置 ${config.name} 于 (${this.x.toFixed(0)}, ${this.y.toFixed(0)})`);
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * 使用投射物：发射飞行道具
+     * @private
+     */
+    _useProjectile(config, world) {
+        if (!world) { console.warn(`[ItemUse] _useProjectile 需要 world 参数`); return false; }
+        const data = config.data;
+        const direction = this.getFacingDirection();
+        let entity = null;
+        switch (config.id) {
+            case 'fireball': entity = new FireballEntity(this.x, this.y, direction, data, this.sessionId); break;
+            case 'flashBang': entity = new FlashBangEntity(this.x, this.y, direction, data, this.sessionId); break;
+            case 'poisonDart': entity = new PoisonDartEntity(this.x, this.y, direction, data, this.sessionId); break;
+            default: console.warn(`[ItemUse] 未处理的投射物类型: ${config.id}`); return false;
+        }
+        if (entity) {
+            world.addItemEntity(entity);
+            console.log(`[ItemUse] ${this.sessionId} 发射 ${config.name} 方向 (${direction.x.toFixed(2)}, ${direction.y.toFixed(2)})`);
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * 使用功能道具：应用 buff 或特殊效果
+     * @private
+     */
+    _useUtility(config) {
+        const data = config.data;
+        switch (config.id) {
+            case 'teleportScroll': {
+                if (this.inventory.isChannelingTeleport) {
+                    console.log(`[ItemUse] ${this.sessionId}: 已在引导回城中`);
+                    return false;
+                }
+                this.inventory.isChannelingTeleport = true;
+                this.inventory.teleportChannelRemaining = data.channelTime || 5000;
+                console.log(`[ItemUse] ${this.sessionId} 开始引导回城, 需要 ${this.inventory.teleportChannelRemaining}ms`);
+                return true;
+            }
+            case 'speedPotion': {
+                const SpeedBuffClass = getBuffClassById('speed');
+                this.giveBuff(new SpeedBuffClass({ id: 'speed', level: Math.round(data.speedBoost * 100), time: data.duration || 8000 }));
+                return true;
+            }
+            case 'invisibleCloak': {
+                const InvisibleBuffClass = getBuffClassById('invisible');
+                this.giveBuff(new InvisibleBuffClass({ id: 'invisible', level: Math.round(data.dmgReduction * 100), time: data.duration || 4000 }));
+                return true;
+            }
+            case 'shieldStone': {
+                const ShieldBuffClass = getBuffClassById('shield');
+                this.giveBuff(new ShieldBuffClass({ id: 'shield', level: data.shieldAmount || 500, time: data.duration || 10000 }));
+                return true;
+            }
+            case 'thornArmor': {
+                const ReboundBuffClass = getBuffClassById('rebound');
+                this.giveBuff(new ReboundBuffClass({ id: 'rebound', level: data.reflectPercent || 30, time: data.duration || 6000 }));
+                return true;
+            }
+            default:
+                console.warn(`[ItemUse] 未处理的功能道具类型: ${config.id}`);
+                return false;
+        }
+    }
+
+    /**
+     * 处理回城卷轴引导（每 tick 调用）
+     * 检查引导进度和中断条件
+     */
+    processTeleportChannel() {
+        const inv = this.inventory;
+        if (!inv.isChannelingTeleport) return;
+
+        // 移动中断引导
+        if (this.dx !== 0 || this.dy !== 0) {
+            console.log(`[Teleport] ${this.sessionId}: 移动中断回城引导`);
+            inv.isChannelingTeleport = false;
+            inv.teleportChannelRemaining = 0;
+            return;
+        }
+
+        inv.teleportChannelRemaining -= Player.TICK_MS;
+
+        if (inv.teleportChannelRemaining <= 0) {
+            inv.isChannelingTeleport = false;
+            inv.teleportChannelRemaining = 0;
+            this.x = this.team === 'A' ? 1280 : 1280;
+            this.y = this.team === 'A' ? 6840 : 360;
+            this.hitbox.x = this.x - 25;
+            this.hitbox.y = this.y - 25;
+            this.speed.set(0, 0);
+            this.knockback.set(0, 0);
+            console.log(`[Teleport] ${this.sessionId} 回城成功 → (${this.x.toFixed(0)}, ${this.y.toFixed(0)})`);
+        }
     }
 }
 
