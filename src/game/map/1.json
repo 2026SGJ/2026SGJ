@@ -46,6 +46,26 @@
          "dir": 180
       },
       {
+         "id": "hint_base_B",
+         "type": "entity",
+         "x": 1280,
+         "y": 550,
+         "asset": "hint",
+         "scale": 100,
+         "isShowed": true,
+         "dir": 0
+      },
+      {
+         "id": "hint_base_A",
+         "type": "entity",
+         "x": 1280,
+         "y": 6750,
+         "asset": "hint",
+         "scale": 100,
+         "isShowed": true,
+         "dir": 0
+      },
+      {
          "id": "wall_base_B_left",
          "type": "wall",
          "x": 1040,
