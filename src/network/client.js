@@ -20,17 +20,21 @@ type("number")(Player.prototype, "rotation");
 type("string")(Player.prototype, "sessionId");
 type("string")(Player.prototype, "uuid");
 type("string")(Player.prototype, "extra");
+type("number")(Player.prototype, "scale");
+type("string")(Player.prototype, "dir");
 
 class GameState extends Schema {
   constructor() {
     super();
     this.onlineCount = 0;
     this.extra = "";
+    this['~refId'] = 0;
     this.players = new MapSchema();
   }
 }
 type("number")(GameState.prototype, "onlineCount");
 type("string")(GameState.prototype, "extra");
+type("number")(GameState.prototype, "~refId");
 type({ map: Player })(GameState.prototype, "players");
 
 const joinRoom = async (server, roomType, projectId, roomId, auth) => {
@@ -47,7 +51,6 @@ const joinRoom = async (server, roomType, projectId, roomId, auth) => {
             extra: auth.extra,
             filter: { name: 'match'}
         }, GameState);
-        console.log("Joined successfully!", room);
         return room;
     } catch (error) {
         console.error("Failed to join room:", error);
