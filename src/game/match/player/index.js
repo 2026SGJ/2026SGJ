@@ -664,7 +664,8 @@ class Player {
                     remaining: b.getRemainingTime(),
                 })),
             },
-            fz: 1
+            fz: 1,
+            "z-index": 1000
         };
     }
 

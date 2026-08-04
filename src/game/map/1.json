@@ -13,7 +13,8 @@
          "asset": "base_B",
          "scale": 100,
          "isShowed": true,
-         "dir": 0
+         "dir": 0,
+         "z_index": 1
       },
       {
          "id": "base_A",
@@ -23,7 +24,8 @@
          "asset": "base_A",
          "scale": 100,
          "isShowed": true,
-         "dir": 0
+         "dir": 0,
+         "z_index": 1
       },
       {
          "id": "flag_base_B",
@@ -33,7 +35,8 @@
          "asset": "pointer",
          "scale": 100,
          "isShowed": true,
-         "dir": 0
+         "dir": 0,
+         "z_index": 2
       },
       {
          "id": "flag_base_A",
@@ -43,7 +46,8 @@
          "asset": "pointer",
          "scale": 100,
          "isShowed": true,
-         "dir": 180
+         "dir": 180,
+         "z_index": 2
       },
       {
          "id": "hint_base_B",
@@ -53,7 +57,8 @@
          "asset": "hint",
          "scale": 100,
          "isShowed": true,
-         "dir": 0
+         "dir": 0,
+         "z_index": 2
       },
       {
          "id": "hint_base_A",
@@ -63,7 +68,8 @@
          "asset": "hint",
          "scale": 100,
          "isShowed": true,
-         "dir": 0
+         "dir": 0,
+         "z_index": 2
       },
       {
          "id": "wall_base_B_left",

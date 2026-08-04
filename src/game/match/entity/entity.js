@@ -1,5 +1,5 @@
 class Entity {
-    constructor({ id, type, x, y, asset, dir, isShowed, effects, width, height }) {
+    constructor({ id, type, x, y, asset, dir, isShowed, effects, width, height, z_index }) {
         this.data = {
             id: id,
             type: type,
@@ -12,7 +12,8 @@ class Entity {
             ghost: effects?.ghost || 0,
             scale: effects?.scale || 100,
             width: width,
-            height: height
+            height: height,
+            "z-index": z_index ?? 0
         };
     }
 
