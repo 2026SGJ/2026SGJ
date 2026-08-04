@@ -672,6 +672,7 @@ class Player {
      * 4. 开采进度 → 5. 移动 → 6. 技能 → 7. Buff → 8. 动画
      */
     tick(players, world) {
+        this.dx = this.dy = 0;
         this.processEvents();
         this.processKeyholding();
         this.updateMiningProximity(world);
