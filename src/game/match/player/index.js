@@ -137,7 +137,7 @@ class Player {
             this.animateState = 'idle';
             return 'idle';
         }
-        this.runAnimate = (this.runAnimate + this.speed.length() / (1.41421356 * this.args.speed)) % this.args.animations.run.frames;
+        this.runAnimate = (this.runAnimate + this.speed.length() / (1.41421356 * 2 * this.args.speed)) % this.args.animations.run.frames;
         return `run${Math.trunc(this.runAnimate) + 1}`;
     }
 
