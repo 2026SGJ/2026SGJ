@@ -651,6 +651,7 @@ class Player {
                 casting: this.usingSkill,
                 skillStates: skillStates,
                 basicReady: this.isBasicReady(),
+                needToPridict: true,
             },
             fz: 1
         };
