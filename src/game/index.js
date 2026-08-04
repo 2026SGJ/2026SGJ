@@ -1,6 +1,7 @@
 import { matchLoop } from './mainloop.js';
 import playerEvent from '../sessions/index.js';
 import Player from './match/player/index.js';
+import BotPlayer, { BOT_PREFIX } from './match/bot/BotPlayer.js';
 import World from './match/world.js';
 import room from '../network/index.js';
 import { render, renderBatch} from './render.js';
@@ -14,9 +15,13 @@ import Shop from './match/item/shop.js';
 class Game {
     constructor() {
         this.matchLoop = null;
-        this.players = {};  // sessionId → Player
+        this.players = {};  // sessionId → Player（含 BotPlayer）
         this.world = null;
         this.renderBuffer = {};  // sessionId → Array<RenderData>
+        /** @type {number} Bot 编号计数器 */
+        this.botCounter = 0;
+        /** @type {Object<string, string>} 人类玩家 → 关联 Bot 的映射 */
+        this.humanToBot = {};
         this.init();
     }
 
@@ -65,6 +70,19 @@ class Game {
                 console.log(`Player added: sessionId=${sessionId}, uuid=${uuid}`);
                 const i = this.players[sessionId];
                 this.renderBuffer[sessionId] = [];
+
+                // ---------- 创建敌方人机 Bot ----------
+                const enemyTeam = assignedTeam === 'A' ? 'B' : 'A';
+                this.botCounter++;
+                const botSessionId = `${BOT_PREFIX}${this.botCounter}`;
+                const botData = { team: enemyTeam, hero: 'newton' };
+                this.players[botSessionId] = new BotPlayer(botSessionId, botData);
+                this.humanToBot[sessionId] = botSessionId;
+                console.log(
+                    `[Bot] 敌方人机已创建: ${botSessionId}, ` +
+                    `team=${enemyTeam}, 对应人类玩家=${sessionId}`
+                );
+                // ---------- 创建敌方人机 Bot ----------
                 // setInterval(() => {
                 //     if (this.renderBuffer[sessionId].length > 2) return; // 如果渲染缓冲区过长，跳过本次渲染
                 //     const startTime = Date.now();
@@ -91,11 +109,18 @@ class Game {
             }
         });
 
-        // 玩家移除
+        // 玩家移除（含 Bot 清理）
         playerEvent.on('playerRemoved', ({ sessionId, uuid, event }) => {
             if (this.players[sessionId]) {
                 delete this.players[sessionId];
                 console.log(`Player removed: sessionId=${sessionId}, uuid=${uuid}`);
+            }
+            // 若该玩家有关联 Bot，同步移除
+            const linkedBot = this.humanToBot[sessionId];
+            if (linkedBot && this.players[linkedBot]) {
+                delete this.players[linkedBot];
+                delete this.humanToBot[sessionId];
+                console.log(`[Bot] 关联人机已移除: ${linkedBot} (人类玩家已离开)`);
             }
         });
 
@@ -219,6 +244,9 @@ class Game {
      * @param {string} sessionId
      */
     _syncInventory(sessionId) {
+        // Bot 玩家跳过网络同步（无对应客户端连接）
+        if (BotPlayer.isBotSession(sessionId)) return;
+
         const player = this.players[sessionId];
         if (!player || !player.inventory) return;
 
@@ -246,6 +274,9 @@ class Game {
      * @param {string} sessionId - 玩家会话ID
      */
     _syncShopOpen(sessionId) {
+        // Bot 玩家跳过网络同步
+        if (BotPlayer.isBotSession(sessionId)) return;
+
         const player = this.players[sessionId];
         if (!player) return;
 
