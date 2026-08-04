@@ -22,12 +22,34 @@ class Game {
     init() {
         // 初始化游戏
         console.log('游戏初始化');
-        this.world = new World({ map_id: '0' });
+        this.world = new World({ map_id: '1' });
         this.matchLoop = setInterval(_=>matchLoop(this.players, this.world), 1000 / 20); // 每秒20 Ticks
 
         playerEvent.on('beforeNewPlayerAdded', ({ sessionId, uuid, event }) => {
             try {
                 const data = JSON.parse(event).data;
+
+                // ---------- 队伍分配 ----------
+                // 统计当前两队人数，新玩家加入人数较少的队伍；
+                // 若两队人数相同，随机选择一队。
+                let teamACount = 0;
+                let teamBCount = 0;
+                for (const p of Object.values(this.players)) {
+                    if (p.team === 'A') teamACount++;
+                    else if (p.team === 'B') teamBCount++;
+                }
+                let assignedTeam;
+                if (teamACount < teamBCount) {
+                    assignedTeam = 'A';
+                } else if (teamBCount < teamACount) {
+                    assignedTeam = 'B';
+                } else {
+                    assignedTeam = Math.random() < 0.5 ? 'A' : 'B';
+                }
+                data.team = assignedTeam;
+                console.log(`[Team] ${sessionId} assigned to team ${assignedTeam} (A:${teamACount}, B:${teamBCount})`);
+                // ---------- 队伍分配 ----------
+
                 this.players[sessionId] = new Player(sessionId, data);
                 console.log(`Player added: sessionId=${sessionId}, uuid=${uuid}`);
                 const i = this.players[sessionId];

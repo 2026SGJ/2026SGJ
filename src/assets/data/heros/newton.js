@@ -14,7 +14,7 @@ export default {
             name: '惯性重击',
             description: '单发伤害 40，自带微退',
             damage: 40, // 造成的物理伤害
-            knockback: 0.25, // 击退效果，数值越大击退越远
+            knockback: 2.5, // 击退效果，数值越大击退越远
             cd: 500, // 两次使用之间的最小间隔时间，单位：毫秒
             cost: 0, // 解锁技能消耗的经济值
             forward: 180 // 从开始攻击到攻击生效的时间间隔，单位：毫秒
@@ -23,7 +23,7 @@ export default {
             name: '质量抛掷',
             description: '砸向目标造成 40 点 物理伤害，附带 0.5 秒轻微硬直（打断对方普攻或采集动作）',
             damage: 40,
-            knockback: 1,
+            knockback: 5, // 击退效果，数值越大击退越远
             cd: 8000, // 两次使用之间的最小间隔时间，单位：毫秒
             cost: 0,
             forward: 350,
@@ -40,7 +40,7 @@ export default {
             description: '黑洞吸附。每秒造成 60 点 持续伤害，持续 3 秒，总计 180 点',
             cd: 7000,
             cost: 120,
-            knockback: -0.2,
+            knockback: -5, // 负数表示吸引，正数表示击退
             forward: 500,
             debuff: [
                 {
@@ -65,7 +65,7 @@ export default {
             ],
             magic: { // 范围伤害
                 damage: 150,
-                knockback: 0.5,
+                knockback: 10,
                 range: 75 // 溅射范围，单位：像素
             }
         },

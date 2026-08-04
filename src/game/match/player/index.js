@@ -28,8 +28,12 @@ class Player {
 
     constructor(sessionId, data) {
         this.sessionId = sessionId;
-        this.x = 0;
-        this.y = 0;
+        /** @type {'A'|'B'} 玩家所属队伍 */
+        this.team = data.team || 'A';
+        // 队伍 A 出生点：底部基地 (1280, 6840)
+        // 队伍 B 出生点：顶部基地 (1280, 360)
+        this.x = this.team === 'A' ? 1280 : 1280;
+        this.y = this.team === 'A' ? 6840 : 360;
         this.dir = 90; // 和移动无关，仅决定渲染方向
         this.speed = new Vec2(0, 0);
         this.knockback = new Vec2(0, 0);
@@ -652,6 +656,7 @@ class Player {
                 skillStates: skillStates,
                 basicReady: this.isBasicReady(),
                 needToPridict: true,
+                team: this.team,
             },
             fz: 1
         };
@@ -724,8 +729,9 @@ class Player {
      * 玩家死亡处理：传送回出生点并重置状态
      */
     onDeath() {
-        this.x = 0;
-        this.y = 0;
+        // 队伍 A 复活在底部基地 (1280, 6840)，队伍 B 复活在顶部基地 (1280, 360)
+        this.x = this.team === 'A' ? 1280 : 1280;
+        this.y = this.team === 'A' ? 6840 : 360;
         // 更新碰撞盒
         this.hitbox.x = this.x - 25;
         this.hitbox.y = this.y - 25;
