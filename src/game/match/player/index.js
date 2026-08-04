@@ -657,6 +657,12 @@ class Player {
                 basicReady: this.isBasicReady(),
                 needToPredict: true,
                 team: this.team,
+                speed: JSON.stringify({ x: this.speed.x, y: this.speed.y }),
+                buffs: this.buffs.map(b => ({
+                    id: b.id,
+                    level: b.level,
+                    remaining: b.getRemainingTime(),
+                })),
             },
             fz: 1
         };
