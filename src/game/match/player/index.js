@@ -117,6 +117,16 @@ class Player {
         this.spawnOutpostTarget = null;
         // ---------- 前哨站重生点相关 ----------
 
+        /** @type {boolean} 当前 tick 是否按下 E 键且附近有商店 */
+        this._shopOpen = false;
+        /** @type {import('../entity/shop.js').default|null} 当前打开的商店引用 */
+        this._openShop = null;
+        /** @type {import('../entity/shop.js').default|null} 当前 tick 最近的可交互商店 */
+        this._nearestShop = null;
+        /** @type {boolean} 玩家附近是否存在可交互商店 */
+        this.canOpenShop = false;
+        // ---------- 商店交互相关 ----------
+
         this.animateState = 'idle';
         this.eventHandlers = {};
         this.eventQueue = [];
@@ -251,6 +261,8 @@ class Player {
 
         // 重置开采状态：如果 E 键不在当前按键列表中，开采被打断
         this.mining = false;
+        // 重置商店打开状态：如果 E 键不在当前按键列表中，商店被打断
+        this._shopOpen = false;
 
         const key = this.heldKeys || [];
         const prevKey = this.prevHeldKeys || [];
@@ -347,6 +359,9 @@ class Player {
                     // 优先级3：采矿 — 没有商店/前哨站时，E 键正常采矿
                     else if (this.canMine && this.miningTarget && !this.miningTarget.collected) {
                         this.mining = true;
+                    } else if (this.canOpenShop) {
+                        // 标记商店打开状态，Game 层监听 shopOpen 事件发送目录
+                        this._shopOpen = true;
                     }
                     break;
             }
@@ -546,6 +561,47 @@ class Player {
             this.miningTime = 0;
             this.canMine = false;
             this.miningTarget = null;
+        }
+    }
+
+    /**
+     * 处理商店打开/关闭信号的发送
+     * 
+     * 当玩家按 E 靠近商店时，通过 game.js 层管理器发送目录；
+     * 当玩家远离商店或松开 E，自动关闭商店。
+     * 
+     * @param {import('../world.js').default} world
+     */
+    processShopOpen(world) {
+        if (this._shopOpen && this.canOpenShop) {
+            // 查找最近的商店
+            let nearest = null;
+            let nearestDist = Infinity;
+            for (const shop of world.shops) {
+                if (!shop.isPlayerNear(this.x, this.y)) continue;
+                const dist = Math.hypot(this.x - shop.data.x, this.y - shop.data.y);
+                if (dist < nearestDist) {
+                    nearestDist = dist;
+                    nearest = shop;
+                }
+            }
+            if (nearest) {
+                // 记录最近商店，供 game.js shopOpen 处理器使用
+                this._nearestShop = nearest;
+            }
+        } else {
+            // 未按 E 或离开范围 → 关闭商店（由 Game 层处理）
+            this._nearestShop = null;
+        }
+
+        // 自动关闭：如果商店已打开但玩家离开交互范围
+        if (this._openShop && !this._openShop.isPlayerNear(this.x, this.y)) {
+            this._openShop.openedBy.delete(this.sessionId);
+            this._openShop = null;
+            this._shopOpen = false;
+            this.canOpenShop = false;
+            // 通知 Game 层关闭（通过触发 shopClose event）
+            this.trigger('shopAutoClose', { sessionId: this.sessionId });
         }
     }
 
@@ -876,6 +932,7 @@ class Player {
         this.updateOutpostProximity(world);
         this.processKeyholding();
         this.processMining();
+        this.processShopOpen(world);
         this.move(world);
         this.processSkills(players);
         this.processBuffs();
@@ -992,6 +1049,14 @@ class Player {
         // 死亡不清空物品栏（保留道具）
         // 如果希望死亡掉落，可取消下面注释：
         // this.inventory.clear();
+        // 清理商店状态
+        if (this._openShop) {
+            this._openShop.openedBy.delete(this.sessionId);
+            this._openShop = null;
+        }
+        this._shopOpen = false;
+        this.canOpenShop = false;
+        this._nearestShop = null;
     }
 
     giveBuff(buff) {

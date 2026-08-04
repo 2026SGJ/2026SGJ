@@ -4,6 +4,7 @@ import Title from './entity/title.js';
 import Wall from './entity/wall.js';
 import Mineral from './entity/mineral.js';
 import Outpost from './entity/outpost.js';
+import Shop from './entity/shop.js';
 
 class World {
     constructor({ map_id }) {
@@ -69,6 +70,12 @@ class World {
                 this.outposts.push(outpostEntity);
                 this.entities.push(outpostEntity);
                 console.log(`[World] 前哨站实体已加载: id=${entity.id}, 位置 (${entity.x}, ${entity.y})`);
+            }
+            // 初始化商店实体
+            if (entity.type === 'shop') {
+                const shopEntity = new Shop(entity);
+                this.shops.push(shopEntity);
+                this.entities.push(shopEntity);
                 continue;
             }
             this.entities.push(new Entity(entity));

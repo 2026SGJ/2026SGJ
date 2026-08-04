@@ -133,6 +133,7 @@ class Game {
             } catch (_) {}
         });
 
+<<<<<<< HEAD
         // ---------- 道具购买 ----------
         playerEvent.on('buyItem', ({ sessionId, uuid, event }) => {
             const player = this.players[sessionId];
@@ -212,6 +213,101 @@ class Game {
                 dest: sessionId, seq: 0,
                 data: { items: Shop.getShopList() }
             }));
+=======
+        // ============================================================
+        //  商店交互事件处理
+        // ============================================================
+
+        // 商店打开请求 — 客户端 GUI 发起
+        playerEvent.on('shopOpen', ({ sessionId, event }) => {
+            const player = this.players[sessionId];
+            if (!player) return;
+
+            // 使用 player tick 中预计算的最近商店
+            const shop = player._nearestShop || this.findNearestShop(player);
+            if (!shop) {
+                this._sendShopError(sessionId, 'no_shop_nearby');
+                return;
+            }
+
+            // 发送商品目录给客户端
+            const catalog = shop.getCatalog(player.team);
+            shop.openedBy.add(sessionId);
+            player._openShop = shop;
+
+            this._sendShopCatalog(sessionId, catalog);
+            console.log(`[Shop] Player ${sessionId} opened shop (team ${player.team})`);
+        });
+
+        // 商店关闭 — 客户端主动关闭
+        playerEvent.on('shopClose', ({ sessionId, event }) => {
+            const player = this.players[sessionId];
+            if (!player) return;
+
+            if (player._openShop) {
+                player._openShop.openedBy.delete(sessionId);
+                player._openShop = null;
+            }
+            player._shopOpen = false;
+            player._nearestShop = null;
+
+            this._sendShopClose(sessionId);
+            console.log(`[Shop] Player ${sessionId} closed shop`);
+        });
+
+        // 处理玩家手动触发的 shopAutoClose（离开范围自动关闭）
+        // 此事件由 Player.processShopOpen 内部触发
+        for (const [sessionId, player] of Object.entries(this.players)) {
+            player.on('shopAutoClose', ({ sessionId: sid }) => {
+                this._sendShopClose(sid);
+                console.log(`[Shop] Player ${sid} left shop range, auto-closed`);
+            });
+        }
+
+        // 商店购买
+        playerEvent.on('shopBuy', ({ sessionId, event }) => {
+            const player = this.players[sessionId];
+            if (!player) return;
+
+            // 解析购买请求
+            let itemId;
+            try {
+                const parsed = JSON.parse(event);
+                itemId = parsed.data?.itemId || parsed.itemId;
+            } catch (_) {
+                itemId = event;
+            }
+            if (!itemId) {
+                this._sendShopError(sessionId, 'invalid_request');
+                return;
+            }
+
+            // 查找可交互的商店
+            const shop = player._openShop || this.findNearestShop(player);
+            if (!shop || !shop.isPlayerNear(player.x, player.y)) {
+                this._sendShopError(sessionId, 'no_shop_nearby');
+                return;
+            }
+
+            const result = shop.buy(player, itemId);
+            if (!result.ok) {
+                this._sendShopBuyResult(sessionId, { ok: false, reason: result.reason });
+                return;
+            }
+
+            // 购买成功 — 返回最新目录和购买结果
+            this._sendShopBuyResult(sessionId, {
+                ok: true,
+                itemId: itemId,
+                money: player.money,
+                catalog: shop.getCatalog(player.team),
+            });
+
+            console.log(
+                `[Shop] Player ${sessionId} bought ${itemId} ` +
+                `(team ${player.team}, money left: ${player.money})`
+            );
+>>>>>>> 5b4d77c (feat:shop)
         });
 
         // 渲染请求（dest 使用 sessionId）
@@ -238,6 +334,7 @@ class Game {
         });
     }
 
+<<<<<<< HEAD
     /**
      * 向客户端发送物品栏同步 (S2CInv)
      * 仅在物品栏发生变化时调用（增量同步）
@@ -299,6 +396,75 @@ class Game {
             // 清除一次性标志，防止每 tick 重复发送
             player.shopJustOpened = false;
         }
+=======
+    // ============================================================
+    //  商店工具方法
+    // ============================================================
+
+    /**
+     * 查找离玩家最近的可交互商店
+     * @param {Player} player
+     * @returns {import('./match/entity/shop.js').default|null}
+     */
+    findNearestShop(player) {
+        let nearest = null;
+        let nearestDist = Infinity;
+        for (const shop of this.world.shops) {
+            if (!shop.isPlayerNear(player.x, player.y)) continue;
+            const dist = Math.hypot(player.x - shop.data.x, player.y - shop.data.y);
+            if (dist < nearestDist) {
+                nearestDist = dist;
+                nearest = shop;
+            }
+        }
+        return nearest;
+    }
+
+    /**
+     * 发送商店目录给客户端
+     * @param {string} sessionId
+     * @param {Object} catalog
+     */
+    _sendShopCatalog(sessionId, catalog) {
+        room.send('S2CShopCatalog', JSON.stringify({
+            dest: sessionId,
+            seq: 0,
+            data: catalog,
+        }));
+    }
+
+    /**
+     * 告知客户端关闭商店界面
+     */
+    _sendShopClose(sessionId) {
+        room.send('S2CShopClose', JSON.stringify({
+            dest: sessionId,
+            seq: 0,
+            data: {},
+        }));
+    }
+
+    /**
+     * 发送购买结果给客户端
+     */
+    _sendShopBuyResult(sessionId, result) {
+        room.send('S2CShopBuyResult', JSON.stringify({
+            dest: sessionId,
+            seq: 0,
+            data: result,
+        }));
+    }
+
+    /**
+     * 发送商店错误消息
+     */
+    _sendShopError(sessionId, reason) {
+        room.send('S2CShopError', JSON.stringify({
+            dest: sessionId,
+            seq: 0,
+            data: { reason },
+        }));
+>>>>>>> 5b4d77c (feat:shop)
     }
 
     end() {
