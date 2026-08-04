@@ -6,8 +6,8 @@
    },
    "entities": [
       {
-         "id": "title_base_B",
-         "type": "title",
+         "id": "base_B",
+         "type": "entity",
          "x": 1280,
          "y": 360,
          "asset": "base_B",
@@ -16,14 +16,34 @@
          "dir": 0
       },
       {
-         "id": "title_base_A",
-         "type": "title",
+         "id": "base_A",
+         "type": "entity",
          "x": 1280,
          "y": 6840,
          "asset": "base_A",
          "scale": 100,
          "isShowed": true,
          "dir": 0
+      },
+      {
+         "id": "flag_base_B",
+         "type": "entity",
+         "x": 1280,
+         "y": 640,
+         "asset": "pointer",
+         "scale": 100,
+         "isShowed": true,
+         "dir": 0
+      },
+      {
+         "id": "flag_base_A",
+         "type": "entity",
+         "x": 1280,
+         "y": 6660,
+         "asset": "pointer",
+         "scale": 100,
+         "isShowed": true,
+         "dir": 180
       },
       {
          "id": "wall_base_B_left",
