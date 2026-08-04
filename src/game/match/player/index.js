@@ -25,7 +25,13 @@ import HealingTotemEntity from '../item/healingTotem.js';
  *   R       — 普攻（basic attack）
  *   F       — 释放当前选中的技能
  *   C       — 切换选中技能（循环 skill1 ~ skill4）
- *   E       — 开采矿物
+ *   E       — 靠近商店时打开商店（优先级最高）；否则靠近矿物时开采
+ * 
+ * 商店交互：
+ * 1. 每 tick 检查是否靠近商店实体（60px）
+ * 2. 玩家按下 E 键时，优先打开商店（发送 S2CShopOpen）
+ * 3. 商店打开期间禁止移动
+ * 4. 松开 E 键或离开商店范围时自动关闭商店
  * 
  * 开采机制：
  * 1. 每 tick 检查是否靠近矿物（30px），若靠近则设置 canMine 标志
@@ -86,6 +92,30 @@ class Player {
         /** @type {number} 玩家经济（金钱） */
         this.money = 0;
         // ---------- 矿物开采相关 ----------
+
+        // ---------- 商店交互相关 ----------
+        /** @type {boolean} 玩家附近是否存在可交互的商店实体 */
+        this.canShop = false;
+        /** @type {boolean} 当前 tick 是否刚刚打开了商店（用于发送 S2CShopOpen 消息） */
+        this.shopJustOpened = false;
+        /** @type {boolean} 玩家是否正在浏览商店（打开商店后禁止移动，类似开采状态） */
+        this.isShopOpen = false;
+        /** @type {import('../entity/entity.js').default|null} 当前最近的商店实体 */
+        this.shopTarget = null;
+        // ---------- 商店交互相关 ----------
+
+        // ---------- 前哨站重生点相关 ----------
+        /**
+         * 玩家自定义重生点（绑定到某个已被己方占领的前哨站）
+         * 当玩家在己方前哨站 25px 内按 E 时设置
+         * @type {import('../entity/outpost.js').default|null}
+         */
+        this.customSpawnOutpost = null;
+        /** @type {boolean} 当前 tick 玩家附近是否有可设置重生点的前哨站 */
+        this.canSetSpawn = false;
+        /** @type {import('../entity/outpost.js').default|null} 最近的可设置重生点的前哨站 */
+        this.spawnOutpostTarget = null;
+        // ---------- 前哨站重生点相关 ----------
 
         this.animateState = 'idle';
         this.eventHandlers = {};
@@ -301,17 +331,34 @@ class Player {
                     }
                     break;
                 case 'KeyE':
-                    // 仅在附近有可开采的矿物时才进入开采状态
-                    if (this.canMine && this.miningTarget && !this.miningTarget.collected) {
+                    // 优先级1：商店 — 靠近商店时 E 键打开商店
+                    if (this.canShop && this.shopTarget) {
+                        // 仅在首次按下或未打开商店时触发打开
+                        if (!this.isShopOpen) {
+                            this.isShopOpen = true;
+                            this.shopJustOpened = true;
+                        }
+                        // 已打开商店后继续按 E 不做额外操作（防止反复开关）
+                    }
+                    // 优先级2：前哨站 — 靠近己方占领的前哨站 25px 内按 E 设置重生点
+                    else if (this.canSetSpawn && this.spawnOutpostTarget) {
+                        this.spawnOutpostTarget.setSpawn(this);
+                    }
+                    // 优先级3：采矿 — 没有商店/前哨站时，E 键正常采矿
+                    else if (this.canMine && this.miningTarget && !this.miningTarget.collected) {
                         this.mining = true;
                     }
                     break;
             }
         }
 
-        // 松开 E 键或失去开采目标时，重置开采进度
+        // 松开 E 键或失去开采/商店目标时，重置状态
         if (!this.mining) {
             this.miningTime = 0;
+        }
+        // 若 E 键未按下，关闭商店
+        if (!key.includes('KeyE')) {
+            this.isShopOpen = false;
         }
 
         // 保存当前帧按键状态供下一帧比较
@@ -409,6 +456,59 @@ class Player {
     }
 
     /**
+     * 更新商店接近检测
+     *
+     * 检查玩家是否在商店实体的交互范围内。
+     * 若离开范围则关闭商店并重置相关状态。
+     *
+     * @param {import('../world.js').default} world - 世界实例
+     */
+    updateShopProximity(world) {
+        const nearbyShop = world.getNearbyShop(this.x, this.y);
+
+        if (nearbyShop) {
+            this.canShop = true;
+            this.shopTarget = nearbyShop;
+        } else {
+            // 离开商店范围时自动关闭商店
+            this.canShop = false;
+            this.shopTarget = null;
+            this.isShopOpen = false;
+            this.shopJustOpened = false;
+        }
+    }
+
+    /**
+     * 更新前哨站重生点接近检测
+     *
+     * 检查玩家是否在己方占领的前哨站 25px 范围内。
+     * 若在范围内则标记 canSetSpawn，供 E 键处理使用。
+     * 若离开范围则重置相关标志。
+     *
+     * @param {import('../world.js').default} world - 世界实例
+     */
+    updateOutpostProximity(world) {
+        const nearbyOutpost = world.getNearbySpawnOutpost(this.x, this.y, this.team);
+
+        if (nearbyOutpost) {
+            this.canSetSpawn = true;
+            this.spawnOutpostTarget = nearbyOutpost;
+        } else {
+            this.canSetSpawn = false;
+            this.spawnOutpostTarget = null;
+        }
+
+        // 若玩家已绑定的前哨站不再有效（被敌方占领），清除自定义重生点
+        if (this.customSpawnOutpost && !this.customSpawnOutpost.isSpawnValid(this)) {
+            console.log(
+                `[Outpost] ${this.sessionId} 的自定义重生点失效 ` +
+                `(前哨站 ${this.customSpawnOutpost.data.id} 已不再被己方占领)`
+            );
+            this.customSpawnOutpost = null;
+        }
+    }
+
+    /**
      * 处理开采进度
      * 
      * 当玩家正在开采（E 按住 + 附近有矿物）时，
@@ -452,8 +552,8 @@ class Player {
     // ---------- 移动 ----------
 
     move(world) {
-        // 开采期间或技能前摇期间或眩晕期间禁止移动，同时刹车惯性速度
-        if (this.mining || this.usingSkill || this.stunned) {
+        // 开采期间或技能前摇期间或眩晕期间或商店打开时禁止移动，同时刹车惯性速度
+        if (this.mining || this.usingSkill || this.stunned || this.isShopOpen) {
             this.speed.set(0, 0);
             return;
         }
@@ -512,6 +612,7 @@ class Player {
 
         for (const [id, player] of Object.entries(players)) {
             if (id === this.sessionId) continue;
+            if (player.team === this.team) continue; // 忽略队友
 
             const dist = Math.hypot(this.x - player.x, this.y - player.y);
             if (dist > 75) continue;
@@ -535,6 +636,7 @@ class Player {
         const targets = [];
         for (const [id, player] of Object.entries(players)) {
             if (id === this.sessionId) continue;
+            if (player.team === this.team) continue; // 忽略队友
             const dist = Math.hypot(this.x - player.x, this.y - player.y);
             if (dist <= range) {
                 targets.push({ player, dist });
@@ -718,6 +820,14 @@ class Player {
                 mining: this.mining,
                 miningTime: this.miningTime,
                 canMine: this.canMine,
+                /** 玩家是否在可交互商店附近 */
+                canShop: this.canShop,
+                /** 玩家是否已打开商店 UI */
+                isShopOpen: this.isShopOpen,
+                /** 玩家附近是否有可设置重生点的前哨站（25px 内 + 己方占领） */
+                canSetSpawn: this.canSetSpawn,
+                /** 玩家当前绑定的自定义重生点前哨站 ID（null 表示无） */
+                spawnOutpostId: this.customSpawnOutpost ? this.customSpawnOutpost.data.id : null,
                 selectedSkill: this.selectedSkill,
                 casting: this.usingSkill,
                 skillStates: skillStates,
@@ -749,7 +859,7 @@ class Player {
      * 每帧主更新入口
      * 
      * 执行顺序：
-     * 1. 消费事件 → 2. 解析按键 → 3. 矿物接近检测
+     * 1. 消费事件 → 2. 附近检测（商店/矿物）→ 3. 解析按键
      * 4. 开采进度 → 5. 移动 → 6. 技能 → 7. Buff → 8. 动画
      */
     tick(players, world) {
@@ -760,8 +870,11 @@ class Player {
         this._playersRef = players;
 
         this.processEvents();
-        this.processKeyholding();
+        // 先进行附近检测，确保本 tick 按键处理时 canShop/canMine/canSetSpawn 已是最新状态
         this.updateMiningProximity(world);
+        this.updateShopProximity(world);
+        this.updateOutpostProximity(world);
+        this.processKeyholding();
         this.processMining();
         this.move(world);
         this.processSkills(players);
@@ -836,12 +949,25 @@ class Player {
     }
 
     /**
-     * 玩家死亡处理：传送回出生点并重置状态
+     * 玩家死亡处理：优先使用前哨站自定义重生点，否则传送回基地
      */
     onDeath() {
-        // 队伍 A 复活在底部基地 (1280, 6840)，队伍 B 复活在顶部基地 (1280, 360)
-        this.x = this.team === 'A' ? 1280 : 1280;
-        this.y = this.team === 'A' ? 6840 : 360;
+        // 检查是否有有效的前哨站自定义重生点
+        if (this.customSpawnOutpost && this.customSpawnOutpost.isSpawnValid(this)) {
+            const outpost = this.customSpawnOutpost;
+            this.x = outpost.data.x;
+            this.y = outpost.data.y;
+            console.log(
+                `[Outpost] ${this.sessionId} 在前哨站 ${outpost.data.id} 重生 ` +
+                `(${this.x.toFixed(0)}, ${this.y.toFixed(0)})`
+            );
+        } else {
+            // 默认回基地
+            this.x = this.team === 'A' ? 1280 : 1280;
+            this.y = this.team === 'A' ? 6840 : 360;
+            // 清除失效的引用
+            this.customSpawnOutpost = null;
+        }
         // 更新碰撞盒
         this.hitbox.x = this.x - 25;
         this.hitbox.y = this.y - 25;
@@ -858,6 +984,11 @@ class Player {
         this.invisible = false;
         this.cantAttack = false;
         this.damageReduction = 0;
+        // 重置商店状态（死亡时强制关闭商店）
+        this.isShopOpen = false;
+        this.shopJustOpened = false;
+        this.canShop = false;
+        this.shopTarget = null;
         // 死亡不清空物品栏（保留道具）
         // 如果希望死亡掉落，可取消下面注释：
         // this.inventory.clear();

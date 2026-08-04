@@ -47,7 +47,7 @@ class FragGrenadeEntity extends Entity {
             radius: config.explodeRadius || 250,
             knockback: config.explodeKnockback || 10,
             ignoreSelf: config.ignoreSelf !== false,
-            ignoreTeammates: false,        // 手雷伤队友（注意误伤）
+            ignoreTeammates: config.ignoreTeammates !== false, // 默认不伤队友
         };
 
         /** @type {string} */

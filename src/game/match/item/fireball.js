@@ -62,7 +62,7 @@ class FireballEntity extends Entity {
             radius: config.explodeRadius || 120,
             knockback: config.explodeKnockback || 40,
             ignoreSelf: config.ignoreSelf !== false,
-            ignoreTeammates: false,
+            ignoreTeammates: config.ignoreTeammates !== false,
         };
 
         /** @type {string} 发射者 */
@@ -99,8 +99,11 @@ class FireballEntity extends Entity {
 
         // --- 检测敌人碰撞 ---
         // 遍历所有玩家，检查火球是否飞入敌人身体范围内（30px）
+        const owner = players[this.ownerSessionId];
+        const ownerTeam = owner ? owner.team : null;
         for (const [sid, player] of Object.entries(players)) {
             if (sid === this.ownerSessionId) continue; // 略过自己
+            if (ownerTeam && player.team === ownerTeam) continue; // 忽略队友
 
             const distToPlayer = Math.hypot(to.x - player.x, to.y - player.y);
             if (distToPlayer < 30) {

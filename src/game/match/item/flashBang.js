@@ -87,8 +87,11 @@ class FlashBangEntity extends Entity {
         }
 
         // --- 检测敌人碰撞 ---
+        const owner = players[this.ownerSessionId];
+        const ownerTeam = owner ? owner.team : null;
         for (const [sid, player] of Object.entries(players)) {
             if (sid === this.ownerSessionId) continue;
+            if (ownerTeam && player.team === ownerTeam) continue; // 忽略队友
 
             const distToPlayer = Math.hypot(to.x - player.x, to.y - player.y);
             if (distToPlayer < 30) {
@@ -123,6 +126,8 @@ class FlashBangEntity extends Entity {
         for (const [sid, player] of Object.entries(players)) {
             // 不对自己施加
             if (sid === this.ownerSessionId) continue;
+            // 忽略队友
+            if (ownerTeam && player.team === ownerTeam) continue;
 
             const dist = Math.hypot(player.x - this.data.x, player.y - this.data.y);
             if (dist > this.stunRadius) continue;

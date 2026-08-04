@@ -31,6 +31,8 @@ class Game {
             // 同步所有玩家的物品栏（仅在变动时发送）
             for (const sessionId of Object.keys(this.players)) {
                 this._syncInventory(sessionId);
+                // 检测商店打开事件，发送 S2CShopOpen
+                this._syncShopOpen(sessionId);
             }
         }, 1000 / 20); // 每秒20 Ticks
 
@@ -232,6 +234,40 @@ class Game {
             }
         }));
         inv.markSynchronized();
+    }
+
+    /**
+     * 检测并发送 S2CShopOpen 消息
+     *
+     * 当玩家靠近商店按下 E 键时，shopJustOpened 标志被置位。
+     * 本方法检测该标志，发送 S2CShopOpen 给客户端以打开商店 UI，
+     * 然后清除标志避免重复发送。
+     *
+     * @param {string} sessionId - 玩家会话ID
+     */
+    _syncShopOpen(sessionId) {
+        const player = this.players[sessionId];
+        if (!player) return;
+
+        if (player.shopJustOpened && player.isShopOpen) {
+            // 发送 S2CShopOpen：包含商店道具列表和玩家当前金钱
+            room.send('S2CShopOpen', JSON.stringify({
+                dest: sessionId,
+                seq: 0,
+                data: {
+                    items: Shop.getShopList(),
+                    money: player.money,
+                }
+            }));
+            console.log(
+                `[Shop] S2CShopOpen → ${sessionId}, ` +
+                `位置 (${player.x.toFixed(0)}, ${player.y.toFixed(0)}), ` +
+                `金钱: ${player.money}`
+            );
+
+            // 清除一次性标志，防止每 tick 重复发送
+            player.shopJustOpened = false;
+        }
     }
 
     end() {

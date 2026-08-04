@@ -3,6 +3,7 @@ import heros from './enum/heros/index.js';
 import minerals from './enum/minerals/index.js';
 import maps from './enum/maps/index.js';
 import itemAssets from './enum/items/index.js';
+import entityAssets, { EntityNames } from './enum/entities/index.js';
 import { ItemNames, ItemStates, ItemTypes } from './enum/items/index.js';
 import {
     ITEM_CONFIG, ITEM_STOCK, ITEMS_BY_TYPE,
@@ -20,6 +21,11 @@ const assets = {
         names: ItemNames,
         states: ItemStates,
         types: ItemTypes,
+    },
+    /** 静态交互实体（商店等）的 asset 映射 */
+    entities: {
+        assets: entityAssets,
+        names: EntityNames,
     },
     data: {
         items: ITEM_CONFIG,

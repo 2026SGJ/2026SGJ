@@ -56,7 +56,7 @@ class BombEntity extends Entity {
             radius: config.explodeRadius || 150,
             knockback: config.explodeKnockback || 25,
             ignoreSelf: config.ignoreSelf !== false,
-            ignoreTeammates: false,         // 炸弹伤队友
+            ignoreTeammates: config.ignoreTeammates !== false, // 默认不伤队友
         };
 
         /** @type {string} 放置者 */

@@ -87,8 +87,11 @@ class PoisonDartEntity extends Entity {
         }
 
         // --- 检测敌人碰撞 ---
+        const owner = players[this.ownerSessionId];
+        const ownerTeam = owner ? owner.team : null;
         for (const [sid, player] of Object.entries(players)) {
             if (sid === this.ownerSessionId) continue;
+            if (ownerTeam && player.team === ownerTeam) continue; // 忽略队友
 
             const distToPlayer = Math.hypot(to.x - player.x, to.y - player.y);
             if (distToPlayer < 30) {

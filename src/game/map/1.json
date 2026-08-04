@@ -28,6 +28,19 @@
          "z_index": 1
       },
       {
+         "id": "shop_B",
+         "type": "shop",
+         "x": 1280,
+         "y": 670,
+         "width": 60,
+         "height": 60,
+         "asset": "shop",
+         "scale": 100,
+         "isShowed": true,
+         "dir": 0,
+         "z_index": 3
+      },
+      {
          "id": "flag_base_B",
          "type": "entity",
          "x": 1280,
@@ -37,6 +50,19 @@
          "isShowed": true,
          "dir": 0,
          "z_index": 2
+      },
+      {
+         "id": "shop_A",
+         "type": "shop",
+         "x": 1280,
+         "y": 6530,
+         "width": 60,
+         "height": 60,
+         "asset": "shop",
+         "scale": 100,
+         "isShowed": true,
+         "dir": 0,
+         "z_index": 3
       },
       {
          "id": "flag_base_A",
@@ -474,6 +500,136 @@
          "scale": 100,
          "isShowed": true,
          "dir": 0
+      },
+      {
+         "id": "outpost_01",
+         "type": "outpost",
+         "x": 1280,
+         "y": 1000,
+         "width": 60,
+         "height": 60,
+         "asset": "outpost_neutral",
+         "scale": 100,
+         "isShowed": true,
+         "dir": 0,
+         "z_index": 4
+      },
+      {
+         "id": "outpost_02",
+         "type": "outpost",
+         "x": 1280,
+         "y": 1578,
+         "width": 60,
+         "height": 60,
+         "asset": "outpost_neutral",
+         "scale": 100,
+         "isShowed": true,
+         "dir": 0,
+         "z_index": 4
+      },
+      {
+         "id": "outpost_03",
+         "type": "outpost",
+         "x": 1280,
+         "y": 2156,
+         "width": 60,
+         "height": 60,
+         "asset": "outpost_neutral",
+         "scale": 100,
+         "isShowed": true,
+         "dir": 0,
+         "z_index": 4
+      },
+      {
+         "id": "outpost_04",
+         "type": "outpost",
+         "x": 1280,
+         "y": 2733,
+         "width": 60,
+         "height": 60,
+         "asset": "outpost_neutral",
+         "scale": 100,
+         "isShowed": true,
+         "dir": 0,
+         "z_index": 4
+      },
+      {
+         "id": "outpost_05",
+         "type": "outpost",
+         "x": 1280,
+         "y": 3311,
+         "width": 60,
+         "height": 60,
+         "asset": "outpost_neutral",
+         "scale": 100,
+         "isShowed": true,
+         "dir": 0,
+         "z_index": 4
+      },
+      {
+         "id": "outpost_06",
+         "type": "outpost",
+         "x": 1280,
+         "y": 3889,
+         "width": 60,
+         "height": 60,
+         "asset": "outpost_neutral",
+         "scale": 100,
+         "isShowed": true,
+         "dir": 0,
+         "z_index": 4
+      },
+      {
+         "id": "outpost_07",
+         "type": "outpost",
+         "x": 1280,
+         "y": 4467,
+         "width": 60,
+         "height": 60,
+         "asset": "outpost_neutral",
+         "scale": 100,
+         "isShowed": true,
+         "dir": 0,
+         "z_index": 4
+      },
+      {
+         "id": "outpost_08",
+         "type": "outpost",
+         "x": 1280,
+         "y": 5044,
+         "width": 60,
+         "height": 60,
+         "asset": "outpost_neutral",
+         "scale": 100,
+         "isShowed": true,
+         "dir": 0,
+         "z_index": 4
+      },
+      {
+         "id": "outpost_09",
+         "type": "outpost",
+         "x": 1280,
+         "y": 5622,
+         "width": 60,
+         "height": 60,
+         "asset": "outpost_neutral",
+         "scale": 100,
+         "isShowed": true,
+         "dir": 0,
+         "z_index": 4
+      },
+      {
+         "id": "outpost_10",
+         "type": "outpost",
+         "x": 1280,
+         "y": 6200,
+         "width": 60,
+         "height": 60,
+         "asset": "outpost_neutral",
+         "scale": 100,
+         "isShowed": true,
+         "dir": 0,
+         "z_index": 4
       }
    ]
 }
