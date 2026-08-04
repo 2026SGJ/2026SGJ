@@ -129,5 +129,5 @@ room.onMessage('C2STouchEvent', (message) => {
 
 room.onStateChange((newState) => {
     // playerEvent.trigger('stateChange', { newState });
-    console.log(`Room state changed: ${newState}`);
+    console.log(`Room state changed: `, newState);
 });
