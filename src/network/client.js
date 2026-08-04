@@ -28,11 +28,13 @@ class GameState extends Schema {
     super();
     this.onlineCount = 0;
     this.extra = "";
+    this.refId = 0;
     this.players = new MapSchema();
   }
 }
 type("number")(GameState.prototype, "onlineCount");
 type("string")(GameState.prototype, "extra");
+type("number")(GameState.prototype, "refId");
 type({ map: Player })(GameState.prototype, "players");
 
 const joinRoom = async (server, roomType, projectId, roomId, auth) => {
