@@ -28,7 +28,7 @@ class GameState extends Schema {
     super();
     this.onlineCount = 0;
     this.extra = "";
-    this.refId = 0;
+    this['~refId'] = 0;
     this.players = new MapSchema();
   }
 }
