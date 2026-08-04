@@ -126,3 +126,8 @@ room.onMessage('C2STouchEvent', (message) => {
     const uuid = message.who.extra.uuid;
     playerEvent.trigger('touchEvent', { sessionId, uuid, event: message.msg });
 });
+
+room.onStateChange((newState) => {
+    // playerEvent.trigger('stateChange', { newState });
+    console.log(`Room state changed: ${newState}`);
+});
