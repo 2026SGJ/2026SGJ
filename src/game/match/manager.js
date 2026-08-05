@@ -288,6 +288,9 @@ class MatchManager {
         const target =
             bots.find(id => this.game.players[id].team === preferredTeam) || bots[0];
         delete this.game.players[target];
+        // 增量渲染下客户端沿用上一帧：被踢人机必须显式通知其他客户端不再跟踪，
+        // 否则客户端会持续保留该人机的缓存（幽灵 + 内存泄漏）
+        this.game.world.markEntityRemoved({ id: target });
         console.log(`[Match] 人机被踢出（为真人让位）: ${target}`);
         return true;
     }
