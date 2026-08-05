@@ -6,6 +6,7 @@ import World from './match/world.js';
 import room from '../network/index.js';
 import { render, renderBatch} from './render.js';
 import Shop from './match/item/shop.js';
+import { flushPopText } from './popText.js';
 
 /**
  * Game类
@@ -33,6 +34,8 @@ class Game {
         // 主循环：每 tick 更新玩家和世界，随后同步物品栏
         this.matchLoop = setInterval(() => {
             matchLoop(this.players, this.world);
+            // 广播本 tick 内产生的漂浮文字（伤害显示 S2CPopText）
+            flushPopText(this.players);
             // 同步所有玩家的物品栏（仅在变动时发送）
             for (const sessionId of Object.keys(this.players)) {
                 this._syncInventory(sessionId);

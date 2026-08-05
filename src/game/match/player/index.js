@@ -14,6 +14,7 @@ import SmokeGrenadeEntity from '../item/smokeGrenade.js';
 import PoisonDartEntity from '../item/poisonDart.js';
 import FreezeTrapEntity from '../item/freezeTrap.js';
 import HealingTotemEntity from '../item/healingTotem.js';
+import { pushPopText } from '../../popText.js';
 
 /**
  * Player — 玩家实体
@@ -162,6 +163,15 @@ class Player {
         /** @type {boolean} 是否被禁止攻击（隐形时） */
         this.cantAttack = false;
         // ---------- Buff/Debuff 状态标志 ----------
+
+        // ---------- 伤害漂浮文字（S2CPopText）----------
+        /**
+         * 每名攻击者的上次伤害漂浮文字发送时间戳
+         * 用于节流：同一攻击者对同一目标的最短弹字间隔（避免 DoT 刷屏）
+         * @type {Object<string, number>} attackerSessionId → timestamp
+         */
+        this._popTextLastSent = {};
+        // ---------- 伤害漂浮文字（S2CPopText）----------
 
         /** @type {Vec2} 上一次移动方向（用于道具发射方向） */
         this.lastMoveDir = new Vec2(this.dir > 0 ? 1 : -1, 0);
@@ -988,7 +998,8 @@ class Player {
         if (attacker && this._reboundPercent > 0 && finalAmount > 0) {
             const reflected = finalAmount * this._reboundPercent;
             if (reflected > 0) {
-                attacker.takeDamage(Math.round(reflected));
+                // 反弹伤害由本玩家（被击者）造成，将反弹者作为 attacker 传递
+                attacker.takeDamage(Math.round(reflected), this);
                 console.log(
                     `[Combat] ${this.sessionId} reflected ${Math.round(reflected)} damage ` +
                     `back to ${attacker.sessionId} (${(this._reboundPercent * 100).toFixed(0)}%)`
@@ -1002,6 +1013,27 @@ class Player {
             this.health = 0;
             console.log(`Player ${this.sessionId} has died.`);
             this.onDeath();
+        }
+
+        // ----- 伤害漂浮文字（S2CPopText）-----
+        // 仅当伤害由他人造成时触发（排除环境伤害 / 自身伤害），
+        // 并按攻击者节流，避免持续伤害（毒/灼烧）每 tick 刷屏。
+        if (attacker && attacker !== this && finalAmount > 0) {
+            const now = Date.now();
+            const last = this._popTextLastSent[attacker.sessionId] || 0;
+            if (now - last >= 200) {
+                this._popTextLastSent[attacker.sessionId] = now;
+                pushPopText({
+                    text: `-${Math.round(finalAmount)}`,
+                    x: this.x,
+                    y: this.y,
+                    color: 0xff4444,
+                    // 轻微随机水平动量，向上漂浮，避免多数字重叠
+                    momentum: { x: (Math.random() - 0.5) * 40, y: -60 },
+                    duration: 800,
+                    ghost: 0,
+                });
+            }
         }
     }
 
@@ -1041,6 +1073,8 @@ class Player {
         this.invisible = false;
         this.cantAttack = false;
         this.damageReduction = 0;
+        // 清空伤害漂浮文字节流记录
+        this._popTextLastSent = {};
         // 重置商店状态（死亡时强制关闭商店）
         this.isShopOpen = false;
         this.shopJustOpened = false;

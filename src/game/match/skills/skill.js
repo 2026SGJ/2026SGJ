@@ -19,8 +19,8 @@ class Skill {
      * @param {Object} targetPlayer - 目标
      */
     onUse(srcPlayer, targetPlayer) {
-        // 计算伤害
-        targetPlayer.takeDamage(this.damage);
+        // 计算伤害（归属攻击者，触发伤害漂浮文字）
+        targetPlayer.takeDamage(this.damage, srcPlayer);
 
         // 处理击退效果（使用 takeKnockback 保证正确的物理交互）
         // 正值为推开，负值为拉近（如黑洞效果）
@@ -41,11 +41,11 @@ class Skill {
             });
         }
 
-        // 处理目标 debuff
+        // 处理目标 debuff（记录攻击者，使 DoT 伤害归属正确）
         if (this.debuff) {
             this.debuff.forEach((debuffData) => {
                 const BuffClass = getBuffClassById(debuffData.id);
-                const debuffInstance = new BuffClass(debuffData);
+                const debuffInstance = new BuffClass({ ...debuffData, attacker: srcPlayer });
                 targetPlayer.giveBuff(debuffInstance);
             });
         }

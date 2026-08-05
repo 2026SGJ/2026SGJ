@@ -139,6 +139,7 @@ class PoisonDartEntity extends Entity {
                 id: 'poison',
                 level: tickDamage,
                 time: this.poisonDuration,
+                attacker: owner, // 记录攻击者，使中毒 DoT 伤害归属正确
             });
             target.giveBuff(poisonBuff);
 
