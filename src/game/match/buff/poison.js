@@ -12,8 +12,8 @@ class PoisonBuff extends Buff {
     }
 
     tick(player) {
-        // 每 tick 造成持续伤害
-        player.takeDamage(this.level);
+        // 每 tick 造成持续伤害（由施加者归属，触发伤害漂浮文字）
+        player.takeDamage(this.level, this.attacker);
     }
 }
 

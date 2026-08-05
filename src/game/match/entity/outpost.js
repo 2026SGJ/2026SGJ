@@ -134,7 +134,8 @@ class Outpost extends Entity {
         // 收集范围内的玩家，按队伍分组
         const teams = { A: [], B: [] };
         for (const [sessionId, player] of Object.entries(players)) {
-            if (player.health <= 0) continue; // 死亡玩家不参与
+            if (player.health <= 0) continue;  // 死亡玩家不参与
+            if (!player.canAct) continue;      // 匹配阶段（canAct=false）不参与占领
             if (!this.isWithinRange(player.x, player.y, CAPTURE_RADIUS)) continue;
             teams[player.team].push(sessionId);
         }

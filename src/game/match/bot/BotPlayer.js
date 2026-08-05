@@ -66,6 +66,18 @@ export default class BotPlayer extends Player {
         this._worldRef = world;
         this._playersRef = players;
 
+        // 已死亡且无法复活：保持静止
+        if (this.dead) {
+            this.dx = 0;
+            this.dy = 0;
+            this.speed.set(0, 0);
+            this.knockback.set(0, 0);
+            this.attacking = false;
+            this.usingSkill = false;
+            this.mining = false;
+            return;
+        }
+
         // ---- 1. 行为树决策：直接设置 this.dx/dy/attacking/mining 等 ----
         this.botController.update(players, world, this);
 

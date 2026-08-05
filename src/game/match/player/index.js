@@ -14,18 +14,37 @@ import SmokeGrenadeEntity from '../item/smokeGrenade.js';
 import PoisonDartEntity from '../item/poisonDart.js';
 import FreezeTrapEntity from '../item/freezeTrap.js';
 import HealingTotemEntity from '../item/healingTotem.js';
+import { pushPopText } from '../../popText.js';
+
+/** 夹取到 [-1, 1]（非有限数值返回 0） */
+const clamp1 = (v) => {
+    const n = Number(v);
+    return Number.isFinite(n) ? Math.max(-1, Math.min(1, n)) : 0;
+};
+/** 夹取到 [0, 1]（非有限数值返回 0） */
+const clamp01 = (v) => {
+    const n = Number(v);
+    return Number.isFinite(n) ? Math.max(0, Math.min(1, n)) : 0;
+};
 
 /**
  * Player — 玩家实体
  * 
  * 负责处理输入、移动、技能、开采矿物等全部玩家逻辑。
  * 
- * 按键映射：
+ * 按键映射（PC 键盘）：
  *   WASD    — 移动
  *   R       — 普攻（basic attack）
  *   F       — 释放当前选中的技能
  *   C       — 切换选中技能（循环 skill1 ~ skill4）
  *   E       — 靠近商店时打开商店（优先级最高）；否则靠近矿物时开采
+ * 
+ * 三端操作支持：
+ *   - 键盘：C2SKeyboardEvent（KeyHolding / KeyDown / KeyUp）
+ *   - 手柄：C2SGamepad / C2SGamepadEvent（左右双摇杆 + 扳机 + ABXY，见 processGamepadInput）
+ *   - 触屏：C2STouch / C2STouchEvent（虚拟摇杆/虚拟按键 → 虚拟数据；否则点击坐标，见 processTouchInput）
+ *   三端共用一套按键状态（effectiveKeys = 键盘 heldKeys ∪ 手柄 _gamepadKeys ∪ 触屏 _touchKeys），
+ *   可同时混用；右摇杆 / 瞄准摇杆 / 世界坐标点击提供瞄准方向（aimDir），影响道具发射方向。
  * 
  * 商店交互：
  * 1. 每 tick 检查是否靠近商店实体（60px）
@@ -131,8 +150,10 @@ class Player {
         this.eventHandlers = {};
         this.eventQueue = [];
 
-        /** @type {string[]} 当前帧已按下的按键列表（'KeyW', 'KeyA', ...） */
+        /** @type {string[]} 当前帧已按下的按键列表（'KeyW', 'KeyA', ...）—— 键盘输入专用 */
         this.heldKeys = [];
+        /** @type {string[]} 三端合并后的有效按键列表（键盘 + 手柄 + 触屏），由 mergeInputKeys 生成，供 processKeyholding 消费 */
+        this.effectiveKeys = [];
         /** @type {string[]} 上一帧的按键列表，用于检测按键增量（KeyC 切换技能等单次触发操作） */
         this.prevHeldKeys = [];
 
@@ -140,6 +161,17 @@ class Player {
         this.health = this.args.health;
         this.maxHealth = this.args.health;
         this.buffs = [];
+
+        // ---------- 对局状态（由 MatchManager 管理） ----------
+        /** @type {boolean} 玩家是否已死亡且无法复活（基地被毁 / 7 分钟加时赛） */
+        this.dead = false;
+        /** @type {boolean} 当前是否允许复活（MatchManager 每 tick 更新） */
+        this.canRevive = true;
+        /** @type {boolean} 当前是否允许行动（匹配阶段 false：仅可移动，禁止攻击/采矿/技能/道具） */
+        this.canAct = true;
+        /** @type {number} 累计击杀数（供队伍结算“总击杀数”比较） */
+        this.kills = 0;
+        // ---------- 对局状态 ----------
 
         // ---------- 物品栏系统 ----------
         /** @type {Inventory} 玩家物品栏实例 */
@@ -162,6 +194,15 @@ class Player {
         /** @type {boolean} 是否被禁止攻击（隐形时） */
         this.cantAttack = false;
         // ---------- Buff/Debuff 状态标志 ----------
+
+        // ---------- 伤害漂浮文字（S2CPopText）----------
+        /**
+         * 每名攻击者的上次伤害漂浮文字发送时间戳
+         * 用于节流：同一攻击者对同一目标的最短弹字间隔（避免 DoT 刷屏）
+         * @type {Object<string, number>} attackerSessionId → timestamp
+         */
+        this._popTextLastSent = {};
+        // ---------- 伤害漂浮文字（S2CPopText）----------
 
         /** @type {Vec2} 上一次移动方向（用于道具发射方向） */
         this.lastMoveDir = new Vec2(this.dir > 0 ? 1 : -1, 0);
@@ -190,8 +231,66 @@ class Player {
         this._reboundPercent = 0;         // 反弹比例（被 ReboundBuff 修改）
         // ---------- Buff 叠加属性 ----------
 
+        // ---------- 渲染增量同步（带宽优化） ----------
+        /**
+         * 最近一次渲染数据的 JSON 指纹（由 Game 主循环每 tick 刷新比对），
+         * 用于判断本玩家渲染数据是否发生变化：静止 / 无冷却的玩家不变化，
+         * 可跳过发送（客户端缺失该玩家时沿用上一帧）。
+         * @type {string|null}
+         */
+        this._renderFingerprint = null;
+        /**
+         * 渲染数据最后变化的全局渲染 tick（world.renderTick），
+         * 渲染组装时与各客户端上次发送 tick 比较，决定是否需要发送。
+         * @type {number}
+         */
+        this._lastChangeTick = 0;
+        /**
+         * 最近一次构建的渲染数据对象（remoteData() 结果，组装时复用），
+         * 避免同一 tick 内多个客户端请求时重复构建。
+         * @type {Object|null}
+         */
+        this._lastRenderData = null;
+        // ---------- 渲染增量同步 ----------
+
+        // ---------- 三端操作支持（键盘 / 手柄 / 触屏） ----------
+        /**
+         * 当前输入设备：'keyboard' | 'gamepad' | 'touch'
+         * 由最近一次收到的输入消息决定，供客户端切换操作提示 UI
+         */
+        this.inputMode = 'keyboard';
+        /** @type {Object|null} 归一化手柄状态（_normalizeGamepadEvent 写入） */
+        this._gamepadState = null;
+        /** @type {Set<string>} 手柄当前折叠出的虚拟按键（供合并入 heldKeys） */
+        this._gamepadKeys = new Set();
+        /** @type {Object|null} 归一化触屏状态（_normalizeTouchEvent 写入） */
+        this._touchState = null;
+        /** @type {Set<string>} 触屏当前折叠出的虚拟按键（供合并入 heldKeys） */
+        this._touchKeys = new Set();
+        /** @type {number} 摇杆/扳机死区（0~1） */
+        this._deadzone = 0.2;
+        /**
+         * 当前瞄准方向（右摇杆 / 瞄准摇杆 / 世界坐标点击）
+         * 用于道具投射物的发射方向，见 getFacingDirection
+         * @type {Vec2}
+         */
+        this.aimDir = new Vec2(0, 0);
+        /** @type {number} 瞄准方向有效截止时间戳（Date.now()） */
+        this._aimUntil = 0;
+        /** @type {{x:number,y:number,world:boolean}|null} 最近一次非虚拟控件点击坐标 */
+        this.lastClick = null;
+        // ---------- 三端操作支持 ----------
+
         this.on('keyboardEvent', (a) => {
             this.eventQueue.push(a);
+        });
+
+        // 手柄 / 触屏事件（由 game/index.js 从网络层转发而来）
+        this.on('gamepadEvent', (a) => {
+            this.eventQueue.push({ source: 'gamepad', data: a });
+        });
+        this.on('touchEvent', (a) => {
+            this.eventQueue.push({ source: 'touch', data: a });
         });
     }
 
@@ -228,10 +327,25 @@ class Player {
      * 支持两种输入模式：
      * - KeyHolding: 客户端每帧发送当前已按下的按键列表
      * - KeyDown / KeyUp: 单个按键按下/抬起事件
+     * 
+     * 手柄（C2SGamepad）与触屏（C2STouch）输入不直接进入 heldKeys，
+     * 而是先归一化到 this._gamepadState / this._touchState，
+     * 再由 processGamepadInput / processTouchInput 折叠成统一按键状态。
      */
     processEvents() {
         while (this.eventQueue.length > 0) {
             const event = this.eventQueue.shift();
+
+            // 手柄 / 触屏输入：交给各自的归一化解析（不参与键盘按键状态）
+            if (event && event.source) {
+                if (event.source === 'gamepad') {
+                    this._normalizeGamepadEvent(event.data);
+                } else if (event.source === 'touch') {
+                    this._normalizeTouchEvent(event.data);
+                }
+                continue;
+            }
+
             const { type, key } = event;
             if (type === 'KeyHolding') {
                 // 保存最新的按键状态，供后续 processKeyholding 使用
@@ -246,6 +360,351 @@ class Player {
                 this.heldKeys = this.heldKeys.filter(k => k !== key);
             }
         }
+    }
+
+    // ============================================================
+    //  手柄 & 触屏输入（三端操作支持）
+    // ============================================================
+
+    /**
+     * 解析 C2SGamepad 消息 → 归一化手柄状态（存于 this._gamepadState）
+     *
+     * 支持两种报文形态：
+     * 1) 快照型（推荐）：
+     *    {
+     *      type: 'GamepadHolding' | 'GamepadState' | 'GamepadChanged',
+     *      axes:    { leftX, leftY, rightX, rightY } 或 [lx, ly, rx, ry],
+     *      buttons: { a, b, x, y, lb, rb, lt, rt }   或 [{pressed}, ...]（标准 Gamepad API 布局）
+     *    }
+     * 2) 平铺型：
+     *    { type, leftX, leftY, rightX, rightY, a, b, x, y, lt, rt, lb, rb }
+     * 3) 单按钮增量：{ type: 'GamepadDown'|'GamepadUp', button: 'a' } 或 { control: 'a', pressed: true }
+     *
+     * 归一化结果：
+     *   { axes: {lx,ly,rx,ry}, buttons: {a,b,x,y,lb,rb,lt,rt} }
+     * 未出现的字段保持上一次的值（支持增量上报），首次上报用默认值。
+     */
+    _normalizeGamepadEvent(data) {
+        if (!data || typeof data !== 'object') return;
+        this.inputMode = 'gamepad';
+
+        const prev = this._gamepadState || {
+            axes: { lx: 0, ly: 0, rx: 0, ry: 0 },
+            buttons: { a: false, b: false, x: false, y: false, lb: false, rb: false, lt: 0, rt: 0 },
+        };
+        const state = {
+            axes: { ...prev.axes },
+            buttons: { ...prev.buttons },
+        };
+
+        const axes = data.axes;
+        const buttons = data.buttons;
+
+        // ---- 摇杆轴 ----
+        if (Array.isArray(axes)) {
+            state.axes.lx = clamp1(axes[0] ?? prev.axes.lx);
+            state.axes.ly = clamp1(axes[1] ?? prev.axes.ly);
+            state.axes.rx = clamp1(axes[2] ?? prev.axes.rx);
+            state.axes.ry = clamp1(axes[3] ?? prev.axes.ry);
+        } else if (axes && typeof axes === 'object') {
+            if (axes.leftX != null) state.axes.lx = clamp1(axes.leftX);
+            if (axes.leftY != null) state.axes.ly = clamp1(axes.leftY);
+            if (axes.rightX != null) state.axes.rx = clamp1(axes.rightX);
+            if (axes.rightY != null) state.axes.ry = clamp1(axes.rightY);
+            if (axes.lx != null) state.axes.lx = clamp1(axes.lx);
+            if (axes.ly != null) state.axes.ly = clamp1(axes.ly);
+            if (axes.rx != null) state.axes.rx = clamp1(axes.rx);
+            if (axes.ry != null) state.axes.ry = clamp1(axes.ry);
+        }
+        // 平铺型轴字段
+        if (data.leftX != null) state.axes.lx = clamp1(data.leftX);
+        if (data.leftY != null) state.axes.ly = clamp1(data.leftY);
+        if (data.rightX != null) state.axes.rx = clamp1(data.rightX);
+        if (data.rightY != null) state.axes.ry = clamp1(data.rightY);
+
+        // ---- 按钮 ----
+        if (Array.isArray(buttons)) {
+            // 标准 Gamepad API 布局：0=A 1=B 2=X 3=Y 4=LB 5=RB 6=LT 7=RT
+            const index = { a: 0, b: 1, x: 2, y: 3, lb: 4, rb: 5, lt: 6, rt: 7 };
+            for (const [name, i] of Object.entries(index)) {
+                const btn = buttons[i];
+                if (btn == null) continue;
+                state.buttons[name] = typeof btn === 'object' ? !!btn.pressed : !!btn;
+            }
+        } else if (buttons && typeof buttons === 'object') {
+            for (const name of ['a', 'b', 'x', 'y', 'lb', 'rb']) {
+                if (buttons[name] != null) state.buttons[name] = !!buttons[name];
+            }
+            for (const name of ['lt', 'rt']) {
+                if (buttons[name] != null) state.buttons[name] = clamp01(buttons[name]);
+            }
+        }
+        // 平铺型按钮字段
+        for (const name of ['a', 'b', 'x', 'y', 'lb', 'rb']) {
+            if (data[name] != null) state.buttons[name] = !!data[name];
+        }
+        for (const name of ['lt', 'rt']) {
+            if (data[name] != null) state.buttons[name] = clamp01(data[name]);
+        }
+
+        // ---- 单按钮增量事件 ----
+        const singleBtn = data.button || data.control;
+        if (typeof singleBtn === 'string' && singleBtn in state.buttons) {
+            const name = singleBtn.toLowerCase();
+            const pressed = data.pressed !== undefined ? !!data.pressed : data.type === 'GamepadDown';
+            state.buttons[name] = (name === 'lt' || name === 'rt') ? (pressed ? 1 : 0) : pressed;
+        }
+
+        this._gamepadState = state;
+    }
+
+    /**
+     * 解析 C2STouch 消息 → 归一化触屏状态（存于 this._touchState）
+     *
+     * 客户端约定：
+     *  - 点击/滑动虚拟按键或虚拟摇杆 → 上报虚拟数据
+     *  - 未点击任何虚拟控件 → 上报点击坐标
+     *
+     * 支持的报文形态：
+     * 1) 虚拟控件事件：
+     *    {
+     *      virtual: true,
+     *      type: 'joystick' | 'button',
+     *      control: 'move' | 'aim'                        // joystick
+     *             | 'attack' | 'skill' | 'interact' | 'switchSkill'
+     *             | 'useItem' | 'item1'..'item10'         // button
+     *      x, y,        // joystick 方向 (-1~1)
+     *      pressed: true|false
+     *    }
+     * 2) 点击坐标事件：
+     *    { virtual: false, x, y, world: false|true }
+     *    world=true 表示 x/y 为世界坐标（用于瞄准）；false 为屏幕坐标
+     * 3) 快照型：
+     *    {
+     *      type: 'TouchHolding' | 'TouchState',
+     *      joystick: {x,y} | null,       // 左虚拟摇杆（移动）
+     *      aim:      {x,y} | null,       // 右虚拟摇杆（瞄准）
+     *      buttons:  { attack: true, skill: true, ... },
+     *      click:    {x,y} | null,
+     *      world:    false|true
+     *    }
+     */
+    _normalizeTouchEvent(data) {
+        if (!data || typeof data !== 'object') return;
+        this.inputMode = 'touch';
+
+        if (!this._touchState) {
+            this._touchState = {
+                joystick: { x: 0, y: 0, active: false },
+                aim: { x: 0, y: 0, active: false },
+                buttons: new Set(),
+                click: null,
+            };
+        }
+        const state = this._touchState;
+
+        // ---- 虚拟控件事件 ----
+        if (data.virtual === true) {
+            const type = data.type === 'stick' ? 'joystick' : (data.type || 'button');
+            const control = data.control;
+            const pressed = data.pressed !== false;
+
+            if (type === 'joystick') {
+                const target = control === 'aim' ? state.aim : state.joystick;
+                if (data.x != null) target.x = clamp1(data.x);
+                if (data.y != null) target.y = clamp1(data.y);
+                target.active = pressed && Math.hypot(target.x, target.y) > this._deadzone;
+            } else if (control) {
+                if (pressed) state.buttons.add(control);
+                else state.buttons.delete(control);
+            }
+            return;
+        }
+
+        // ---- 快照型 ----
+        if (data.type === 'TouchHolding' || data.type === 'TouchState' ||
+            data.joystick !== undefined || data.aim !== undefined || data.buttons || data.click !== undefined) {
+            // 左虚拟摇杆（移动）
+            if (data.joystick !== undefined) {
+                if (data.joystick) {
+                    state.joystick.x = clamp1(data.joystick.x ?? 0);
+                    state.joystick.y = clamp1(data.joystick.y ?? 0);
+                    state.joystick.active = Math.hypot(state.joystick.x, state.joystick.y) > this._deadzone;
+                } else {
+                    // 显式 null = 松开摇杆
+                    state.joystick.x = 0;
+                    state.joystick.y = 0;
+                    state.joystick.active = false;
+                }
+            }
+            // 右虚拟摇杆（瞄准）
+            if (data.aim !== undefined) {
+                if (data.aim) {
+                    state.aim.x = clamp1(data.aim.x ?? 0);
+                    state.aim.y = clamp1(data.aim.y ?? 0);
+                    state.aim.active = Math.hypot(state.aim.x, state.aim.y) > this._deadzone;
+                } else {
+                    state.aim.x = 0;
+                    state.aim.y = 0;
+                    state.aim.active = false;
+                }
+            }
+            if (data.buttons && typeof data.buttons === 'object') {
+                for (const [ctrl, v] of Object.entries(data.buttons)) {
+                    if (v) state.buttons.add(ctrl);
+                    else state.buttons.delete(ctrl);
+                }
+            }
+            if (data.click !== undefined) {
+                state.click = data.click ? { x: Number(data.click.x), y: Number(data.click.y), world: !!data.world } : null;
+            }
+            return;
+        }
+
+        // ---- 点击坐标事件 ----
+        if (data.x != null && data.y != null) {
+            state.click = { x: Number(data.x), y: Number(data.y), world: !!data.world };
+        }
+    }
+
+    /**
+     * 将归一化的手柄状态折叠进 _gamepadKeys / aimDir
+     * 每 tick 在 mergeInputKeys 之前调用（与键盘、触屏共用一套按键状态）
+     *
+     * 按键映射：
+     *   左摇杆   → 移动（KeyW/A/S/D，语义与键盘一致）
+     *   右摇杆   → 瞄准方向（影响道具投射物发射方向）
+     *   A        → 普攻（KeyR）
+     *   X        → 释放技能（KeyF）
+     *   Y        → 切换技能（KeyC）
+     *   B        → 交互（KeyE：商店/开采/设置重生点）
+     *   RT（扳机）→ 普攻（KeyR）
+     *   LT（扳机）→ 使用 1 号位道具（Digit1）
+     */
+    processGamepadInput() {
+        const gp = this._gamepadState;
+        this._gamepadKeys.clear();
+        if (!gp) return;
+
+        const dz = this._deadzone;
+        const { lx, ly, rx, ry } = gp.axes;
+        const B = gp.buttons;
+
+        // ---- 左摇杆 → 移动 ----
+        if (Math.abs(lx) > dz) {
+            this._gamepadKeys.add(lx > 0 ? 'KeyD' : 'KeyA');
+        }
+        if (Math.abs(ly) > dz) {
+            // 摇杆向上（标准 y<0）→ KeyW，向下 → KeyS
+            this._gamepadKeys.add(ly < 0 ? 'KeyW' : 'KeyS');
+        }
+
+        // ---- 右摇杆 → 瞄准 ----
+        if (Math.abs(rx) > dz || Math.abs(ry) > dz) {
+            this._setAim(rx, ry);
+        }
+
+        // ---- ABXY ----
+        if (B.a) this._gamepadKeys.add('KeyR');
+        if (B.x) this._gamepadKeys.add('KeyF');
+        if (B.y) this._gamepadKeys.add('KeyC');
+        if (B.b) this._gamepadKeys.add('KeyE');
+
+        // ---- 扳机 ----
+        if (B.rt > dz) this._gamepadKeys.add('KeyR');
+        if (B.lt > dz) this._gamepadKeys.add('Digit1');
+    }
+
+    /**
+     * 将归一化的触屏状态折叠进 _touchKeys / aimDir
+     * 每 tick 在 mergeInputKeys 之前调用（与键盘、手柄共用一套按键状态）
+     *
+     * 虚拟控件映射：
+     *   左虚拟摇杆       → 移动（KeyW/A/S/D）
+     *   右虚拟摇杆(aim)  → 瞄准方向
+     *   虚拟按键：
+     *     attack      → 普攻（KeyR）
+     *     skill       → 释放技能（KeyF）
+     *     interact    → 交互（KeyE：商店/开采/设置重生点）
+     *     switchSkill → 切换技能（KeyC）
+     *     useItem     → 使用 1 号位道具（Digit1）
+     *     item1~item10→ 使用对应槽位道具（Digit1~Digit0）
+     *   点击坐标（world=true）→ 玩家朝向点击点（瞄准方向）
+     */
+    processTouchInput() {
+        const t = this._touchState;
+        this._touchKeys.clear();
+        if (!t) return;
+
+        // ---- 左虚拟摇杆 → 移动 ----
+        if (t.joystick.active) {
+            if (t.joystick.y < -this._deadzone) this._touchKeys.add('KeyW');
+            if (t.joystick.y > this._deadzone) this._touchKeys.add('KeyS');
+            if (t.joystick.x < -this._deadzone) this._touchKeys.add('KeyA');
+            if (t.joystick.x > this._deadzone) this._touchKeys.add('KeyD');
+        }
+
+        // ---- 右虚拟摇杆 → 瞄准 ----
+        if (t.aim.active) {
+            this._setAim(t.aim.x, t.aim.y);
+        }
+
+        // ---- 虚拟按键 ----
+        const BTN_MAP = {
+            attack: 'KeyR',
+            skill: 'KeyF',
+            interact: 'KeyE',
+            switchSkill: 'KeyC',
+            useItem: 'Digit1',
+        };
+        for (const [ctrl, key] of Object.entries(BTN_MAP)) {
+            if (t.buttons.has(ctrl)) this._touchKeys.add(key);
+        }
+        for (let i = 0; i < 10; i++) {
+            if (t.buttons.has(`item${i + 1}`)) {
+                this._touchKeys.add(i === 9 ? 'Digit0' : `Digit${i + 1}`);
+            }
+        }
+
+        // ---- 点击坐标 → 瞄准方向（世界坐标） ----
+        if (t.click && t.click.world) {
+            this.lastClick = { x: t.click.x, y: t.click.y, world: true };
+            const dx = t.click.x - this.x;
+            const dy = t.click.y - this.y;
+            if (Math.hypot(dx, dy) > 1) {
+                this._setAim(dx, dy);
+            }
+        } else if (t.click) {
+            this.lastClick = { x: t.click.x, y: t.click.y, world: false };
+        }
+    }
+
+    /**
+     * 合并键盘（heldKeys）与手柄（_gamepadKeys）、触屏（_touchKeys）的按键状态
+     * 生成 effectiveKeys 供 processKeyholding 消费，使三端输入可同时生效。
+     * 键盘部分保持独立（heldKeys），避免三端合并后互相污染。
+     */
+    mergeInputKeys() {
+        const merged = Array.isArray(this.heldKeys) ? [...this.heldKeys] : [];
+        for (const k of this._gamepadKeys) {
+            if (!merged.includes(k)) merged.push(k);
+        }
+        for (const k of this._touchKeys) {
+            if (!merged.includes(k)) merged.push(k);
+        }
+        this.effectiveKeys = merged;
+    }
+
+    /**
+     * 设置瞄准方向并使其保持一段有效时间（供 getFacingDirection 使用）
+     * @param {number} x
+     * @param {number} y
+     * @param {number} [duration] 有效时长 ms
+     */
+    _setAim(x, y, duration = 500) {
+        if (Math.hypot(x, y) < 0.001) return;
+        this.aimDir.set(x, y).normalize();
+        this._aimUntil = Date.now() + duration;
     }
 
     /**
@@ -264,8 +723,10 @@ class Player {
         // 重置商店打开状态：如果 E 键不在当前按键列表中，商店被打断
         this._shopOpen = false;
 
-        const key = this.heldKeys || [];
+        const key = this.effectiveKeys || [];
         const prevKey = this.prevHeldKeys || [];
+        // 行动许可：匹配阶段（canAct=false）仅允许移动，禁止攻击/采矿/技能/道具
+        const canAct = this.canAct;
 
         // ---- 眩晕状态下跳过所有输入 ----
         if (this.stunned) {
@@ -289,11 +750,12 @@ class Player {
         }
 
         // ---- 道具快捷键（数字键 1-0 对应物品栏 1-10 号位） ----
+        // 匹配阶段禁止使用道具
         const digitKeys = ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5',
                           'Digit6', 'Digit7', 'Digit8', 'Digit9', 'Digit0'];
         for (let slotIdx = 0; slotIdx < digitKeys.length; slotIdx++) {
             const dk = digitKeys[slotIdx];
-            if (key.includes(dk) && !prevKey.includes(dk)) {
+            if (canAct && key.includes(dk) && !prevKey.includes(dk)) {
                 this._useItemBySlot(slotIdx);
             }
         }
@@ -315,8 +777,8 @@ class Player {
                     this.dir = 90;
                     break;
                 case 'KeyR':
-                    // 普攻 — 仅在未释放技能且未被禁止攻击时允许
-                    if (!this.usingSkill && !this.cantAttack && this.isBasicReady()) {
+                    // 普攻 — 匹配阶段禁止；仅在未释放技能且未被禁止攻击时允许
+                    if (canAct && !this.usingSkill && !this.cantAttack && this.isBasicReady()) {
                         this.attacking = true;
                         if (!wasAttacking) {
                             this.attackForward = this.args.attacks.basic.forward || 0;
@@ -324,8 +786,8 @@ class Player {
                     }
                     break;
                 case 'KeyF':
-                    // 释放当前选中技能 — 仅在未攻击且未被禁止攻击时允许
-                    if (!this.attacking && !this.usingSkill && !this.cantAttack) {
+                    // 释放当前选中技能 — 匹配阶段禁止；仅在未攻击且未被禁止攻击时允许
+                    if (canAct && !this.attacking && !this.usingSkill && !this.cantAttack) {
                         const skillKey = `skill${this.selectedSkill}`;
                         if (this.isSkillReady(this.selectedSkill)) {
                             const skillData = this.args.attacks[skillKey];
@@ -343,6 +805,8 @@ class Player {
                     }
                     break;
                 case 'KeyE':
+                    // 匹配阶段禁止商店/采矿/重生点交互
+                    if (!canAct) break;
                     // 优先级1：商店 — 靠近商店时 E 键打开商店
                     if (this.canShop && this.shopTarget) {
                         // 仅在首次按下或未打开商店时触发打开
@@ -528,8 +992,15 @@ class Player {
      * 
      * 当玩家正在开采（E 按住 + 附近有矿物）时，
      * 每 tick 累加 miningTime，达到阈值后完成采集。
+     * 匹配阶段禁止采矿。
      */
     processMining() {
+        if (!this.canAct) {
+            // 匹配阶段：强制打断采矿
+            this.mining = false;
+            this.miningTime = 0;
+            return;
+        }
         if (!this.mining || !this.miningTarget || !this.miningTarget.config) return;
 
         // 安全检查：目标可能在两次 tick 间被其他玩家采集
@@ -660,6 +1131,7 @@ class Player {
     /**
      * 查找最近的低血量敌人（75px 范围内）
      * 优先血量最低者，同等血量优先距离最近者
+     * （跳过已死亡的玩家）
      */
     findTarget(players) {
         let bestTarget = null;
@@ -669,6 +1141,7 @@ class Player {
         for (const [id, player] of Object.entries(players)) {
             if (id === this.sessionId) continue;
             if (player.team === this.team) continue; // 忽略队友
+            if (player.dead || player.health <= 0) continue; // 忽略已死亡玩家
 
             const dist = Math.hypot(this.x - player.x, this.y - player.y);
             if (dist > 75) continue;
@@ -685,7 +1158,7 @@ class Player {
     }
 
     /**
-     * 查找范围内所有敌人（用于 AOE）
+     * 查找范围内所有敌人（用于 AOE，跳过已死亡玩家）
      * @param {number} range - 溅射范围（像素）
      */
     findTargetsInRange(players, range) {
@@ -693,6 +1166,7 @@ class Player {
         for (const [id, player] of Object.entries(players)) {
             if (id === this.sessionId) continue;
             if (player.team === this.team) continue; // 忽略队友
+            if (player.dead || player.health <= 0) continue; // 忽略已死亡玩家
             const dist = Math.hypot(this.x - player.x, this.y - player.y);
             if (dist <= range) {
                 targets.push({ player, dist });
@@ -704,9 +1178,10 @@ class Player {
     /**
      * 处理普攻
      * 前摇计时 → 计时归零时命中目标
+     * 匹配阶段禁止攻击。
      */
     processBasicAttack(players) {
-        if (!this.attacking) return;
+        if (!this.attacking || !this.canAct) return;
 
         // 使用 TICK_MS 进行时间衰减，而非固定 0.1
         this.attackForward = Math.max(0, this.attackForward - Player.TICK_MS);
@@ -739,9 +1214,10 @@ class Player {
     /**
      * 处理技能释放
      * 前摇计时 → 计时归零时释放技能效果
+     * 匹配阶段禁止释放技能。
      */
     processSkillCast(players) {
-        if (!this.usingSkill) return;
+        if (!this.usingSkill || !this.canAct) return;
 
         // 使用 TICK_MS 进行时间衰减
         this.skillCastForward = Math.max(0, this.skillCastForward - Player.TICK_MS);
@@ -844,6 +1320,17 @@ class Player {
 
     // ---------- 网络同步 ----------
 
+    /**
+     * 坐标精度裁剪：保留 0.1 像素精度（渲染精度足够），
+     * 避免浮点累积误差（如 1280.0000000001）撑大 JSON 体积。
+     * 仅用于渲染数据，不影响内部逻辑坐标。
+     * @param {number} v - 原始坐标值
+     * @returns {number} 裁剪后的坐标值
+     */
+    static _trimCoord(v) {
+        return Math.round(v * 10) / 10;
+    }
+
     remoteData() {
         // 构建技能状态信息（供客户端 UI 展示）
         const skillStates = {};
@@ -862,10 +1349,11 @@ class Player {
 
         return {
             type: 'update',
-            x: this.x,
-            y: this.y,
+            // 坐标裁剪到 0.1px 精度（渲染精度足够，大幅减小 JSON 体积）
+            x: Player._trimCoord(this.x),
+            y: Player._trimCoord(this.y),
             asset: this.costume,
-            isShowed: true,
+            isShowed: !this.dead, // 死亡玩家不再显示（客户端可隐藏模型）
             id: this.sessionId,
             scale: 100,
             dir: this.dir,
@@ -873,6 +1361,10 @@ class Player {
                 health: this.health,
                 maxHealth: this.maxHealth,
                 money: this.money,
+                /** 是否已死亡且无法复活（基地被毁 / 加时赛） */
+                dead: this.dead,
+                /** 累计击杀数（供客户端展示 / 队伍结算） */
+                kills: this.kills,
                 mining: this.mining,
                 miningTime: this.miningTime,
                 canMine: this.canMine,
@@ -890,7 +1382,25 @@ class Player {
                 basicReady: this.isBasicReady(),
                 needToPredict: true,
                 team: this.team,
-                speed: JSON.stringify({ x: this.speed.x, y: this.speed.y }),
+                // 三端输入状态（客户端可据此切换操作提示 UI）
+                inputMode: this.inputMode,
+                aiming: this._aimUntil > Date.now(),
+                // 瞄准方向：保持客户端约定的字符串格式，仅裁剪数值精度（0.01）
+                aimDir: JSON.stringify({
+                    x: Math.round(this.aimDir.x * 100) / 100,
+                    y: Math.round(this.aimDir.y * 100) / 100,
+                }),
+                // 点击坐标：保持对象格式，仅裁剪数值精度（0.1）
+                lastClick: this.lastClick ? {
+                    x: Player._trimCoord(this.lastClick.x),
+                    y: Player._trimCoord(this.lastClick.y),
+                    world: this.lastClick.world,
+                } : null,
+                // 速度：保持客户端约定的字符串格式，仅裁剪数值精度（0.1）
+                speed: JSON.stringify({
+                    x: Player._trimCoord(this.speed.x),
+                    y: Player._trimCoord(this.speed.y),
+                }),
                 buffs: this.buffs.map(b => ({
                     id: b.id,
                     level: b.level,
@@ -921,11 +1431,28 @@ class Player {
     tick(players, world) {
         this.dx = this.dy = 0;
 
+        // 已死亡且无法复活：保持静止，不处理任何输入/行动
+        if (this.dead) {
+            // 清空积压输入队列，防止观战期间无界增长
+            this.eventQueue.length = 0;
+            this.speed.set(0, 0);
+            this.knockback.set(0, 0);
+            this.attacking = false;
+            this.usingSkill = false;
+            this.mining = false;
+            return;
+        }
+
         // 存储 world 和 players 引用，供键盘快捷键使用道具时使用
         this._worldRef = world;
         this._playersRef = players;
 
         this.processEvents();
+        // 手柄 / 触屏输入 → 折叠成各自的虚拟按键集
+        this.processGamepadInput();
+        this.processTouchInput();
+        // 合并键盘 + 手柄 + 触屏按键（三端可同时生效）
+        this.mergeInputKeys();
         // 先进行附近检测，确保本 tick 按键处理时 canShop/canMine/canSetSpawn 已是最新状态
         this.updateMiningProximity(world);
         this.updateShopProximity(world);
@@ -940,6 +1467,13 @@ class Player {
         this.costume = `${this.hero}_${this.animate()}`;
     }
 
+    /**
+     * [废弃] 旧全量渲染管线入口（不再被调用）
+     *
+     * S2CRender 已改为 Game._buildRenderPacket 的增量同步：
+     * 首次全量建立客户端缓存，之后仅发送变化的实体/玩家。
+     * 该方法及其依赖的 World.culling 保留仅供参考 / 按视野裁剪扩展。
+     */
     render(f) {
         let entities = f(this.x, this.y, 320, 180);
         let renderData = [];
@@ -964,6 +1498,9 @@ class Player {
      * @param {Player} [attacker] - 攻击者（用于反弹计算）
      */
     takeDamage(amount, attacker) {
+        // 已死亡且无法复活的玩家忽略后续伤害（防止重复触发死亡/击杀计数）
+        if (this.dead) return;
+
         let finalAmount = amount;
 
         // ----- 护盾吸收 -----
@@ -988,7 +1525,8 @@ class Player {
         if (attacker && this._reboundPercent > 0 && finalAmount > 0) {
             const reflected = finalAmount * this._reboundPercent;
             if (reflected > 0) {
-                attacker.takeDamage(Math.round(reflected));
+                // 反弹伤害由本玩家（被击者）造成，将反弹者作为 attacker 传递
+                attacker.takeDamage(Math.round(reflected), this);
                 console.log(
                     `[Combat] ${this.sessionId} reflected ${Math.round(reflected)} damage ` +
                     `back to ${attacker.sessionId} (${(this._reboundPercent * 100).toFixed(0)}%)`
@@ -1001,14 +1539,75 @@ class Player {
         if (this.health <= 0) {
             this.health = 0;
             console.log(`Player ${this.sessionId} has died.`);
+            // 击杀计数：计入攻击者（人机与真人同等地位，供“总击杀数”结算）
+            if (attacker && attacker !== this) {
+                attacker.kills = (attacker.kills || 0) + 1;
+            }
             this.onDeath();
+        }
+
+        // ----- 伤害漂浮文字（S2CPopText）-----
+        // 仅当伤害由他人造成时触发（排除环境伤害 / 自身伤害），
+        // 并按攻击者节流，避免持续伤害（毒/灼烧）每 tick 刷屏。
+        if (attacker && attacker !== this && finalAmount > 0) {
+            const now = Date.now();
+            const last = this._popTextLastSent[attacker.sessionId] || 0;
+            if (now - last >= 200) {
+                this._popTextLastSent[attacker.sessionId] = now;
+                pushPopText({
+                    text: `-${Math.round(finalAmount)}`,
+                    x: this.x,
+                    y: this.y,
+                    color: 0xff4444,
+                    // 轻微随机水平动量，向上漂浮，避免多数字重叠
+                    momentum: { x: (Math.random() - 0.5) * 40, y: -60 },
+                    duration: 800,
+                    ghost: 0,
+                });
+            }
         }
     }
 
     /**
-     * 玩家死亡处理：优先使用前哨站自定义重生点，否则传送回基地
+     * 玩家死亡处理：
+     *   - 可复活（canRevive）：优先使用前哨站自定义重生点，否则传送回基地
+     *   - 不可复活（基地被毁 / 7 分钟加时赛）：保持死亡状态（this.dead = true），
+     *     由 MatchManager 据此判定“一方玩家死绝”与胜负
      */
     onDeath() {
+        // 无法复活：保持死亡状态，重置所有战斗状态
+        if (!this.canRevive) {
+            this.dead = true;
+            this.speed.set(0, 0);
+            this.knockback.set(0, 0);
+            this.buffs = [];
+            this._strengthMultiplier = 1.0;
+            this._reboundPercent = 0;
+            this.stunned = false;
+            this.shield = 0;
+            this.speedMultiplier = 1.0;
+            this.slowAmount = 0;
+            this.invisible = false;
+            this.cantAttack = false;
+            this.damageReduction = 0;
+            this._popTextLastSent = {};
+            // 死亡时强制关闭商店
+            this.isShopOpen = false;
+            this.shopJustOpened = false;
+            if (this._openShop) {
+                this._openShop.openedBy.delete(this.sessionId);
+                this._openShop = null;
+            }
+            this._shopOpen = false;
+            this.canOpenShop = false;
+            this._nearestShop = null;
+            console.log(`Player ${this.sessionId} 无法复活（基地被毁或加时赛），保持阵亡状态`);
+            return;
+        }
+
+        // 可复活：正常重生
+        this.dead = false;
+
         // 检查是否有有效的前哨站自定义重生点
         if (this.customSpawnOutpost && this.customSpawnOutpost.isSpawnValid(this)) {
             const outpost = this.customSpawnOutpost;
@@ -1041,6 +1640,8 @@ class Player {
         this.invisible = false;
         this.cantAttack = false;
         this.damageReduction = 0;
+        // 清空伤害漂浮文字节流记录
+        this._popTextLastSent = {};
         // 重置商店状态（死亡时强制关闭商店）
         this.isShopOpen = false;
         this.shopJustOpened = false;
@@ -1074,10 +1675,15 @@ class Player {
 
     /**
      * 获取玩家面朝方向（单位向量）
-     * 优先使用最近一次移动方向，其次根据 dir 判断左右
+     * 优先使用瞄准方向（手柄右摇杆 / 触屏瞄准摇杆 / 世界坐标点击），
+     * 其次为最近一次移动方向，最后根据 dir 判断左右
      * @returns {Vec2}
      */
     getFacingDirection() {
+        // 手柄 / 触屏瞄准优先（右摇杆、瞄准摇杆、世界坐标点击）
+        if (this._aimUntil > Date.now() && this.aimDir.lengthSq() > 0.001) {
+            return this.aimDir.clone();
+        }
         if (this.lastMoveDir && this.lastMoveDir.lengthSq() > 0.001) {
             return this.lastMoveDir.clone();
         }
