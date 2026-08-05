@@ -43,14 +43,6 @@ class World {
                 this.entities.push(titleEntity);
                 continue;
             }
-            // 初始化商店实体（静态交互实体）
-            if (entity.type === 'shop') {
-                const shopEntity = new Entity(entity);
-                this.shops.push(shopEntity);
-                this.entities.push(shopEntity);
-                console.log(`[World] 商店实体已加载: id=${entity.id}, 位置 (${entity.x}, ${entity.y})`);
-                continue;
-            }
             if (entity.type === 'wall') {
                 const wallEntity = new Wall(entity);
                 this.walls.push(wallEntity);
@@ -71,11 +63,12 @@ class World {
                 this.entities.push(outpostEntity);
                 console.log(`[World] 前哨站实体已加载: id=${entity.id}, 位置 (${entity.x}, ${entity.y})`);
             }
-            // 初始化商店实体
+            // 初始化商店实体（静态交互实体，使用 Shop 类以支持库存/刷新等逻辑）
             if (entity.type === 'shop') {
                 const shopEntity = new Shop(entity);
                 this.shops.push(shopEntity);
                 this.entities.push(shopEntity);
+                console.log(`[World] 商店实体已加载: id=${entity.id}, 位置 (${entity.x}, ${entity.y})`);
                 continue;
             }
             this.entities.push(new Entity(entity));

@@ -133,8 +133,9 @@ class Game {
             } catch (_) {}
         });
 
-<<<<<<< HEAD
-        // ---------- 道具购买 ----------
+        // ============================================================
+        //  道具购买（物品栏系统 — C2SBuyItem）
+        // ============================================================
         playerEvent.on('buyItem', ({ sessionId, uuid, event }) => {
             const player = this.players[sessionId];
             if (!player) return;
@@ -206,16 +207,17 @@ class Game {
             }
         });
 
-        // ---------- 商店列表查询 ----------
+        // ---------- 商店列表查询（C2SShopList / S2CShopList） ----------
         room.onMessage('C2SShopList', ({ who, msg }) => {
             const sessionId = who.sessionId;
             room.send('S2CShopList', JSON.stringify({
                 dest: sessionId, seq: 0,
                 data: { items: Shop.getShopList() }
             }));
-=======
+        });
+
         // ============================================================
-        //  商店交互事件处理
+        //  商店交互事件处理（实体商店系统 — C2SShopOpen/Close/Buy）
         // ============================================================
 
         // 商店打开请求 — 客户端 GUI 发起
@@ -307,7 +309,6 @@ class Game {
                 `[Shop] Player ${sessionId} bought ${itemId} ` +
                 `(team ${player.team}, money left: ${player.money})`
             );
->>>>>>> 5b4d77c (feat:shop)
         });
 
         // 渲染请求（dest 使用 sessionId）
@@ -334,7 +335,10 @@ class Game {
         });
     }
 
-<<<<<<< HEAD
+    // ============================================================
+    //  商店 & 物品栏 工具方法（合并自两套商店系统）
+    // ============================================================
+
     /**
      * 向客户端发送物品栏同步 (S2CInv)
      * 仅在物品栏发生变化时调用（增量同步）
@@ -396,10 +400,7 @@ class Game {
             // 清除一次性标志，防止每 tick 重复发送
             player.shopJustOpened = false;
         }
-=======
-    // ============================================================
-    //  商店工具方法
-    // ============================================================
+    }
 
     /**
      * 查找离玩家最近的可交互商店
@@ -464,7 +465,6 @@ class Game {
             seq: 0,
             data: { reason },
         }));
->>>>>>> 5b4d77c (feat:shop)
     }
 
     end() {
