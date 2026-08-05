@@ -11,6 +11,24 @@ import ShopGui, { FAIL_REASON_TEXT } from './match/gui/shopGui.js';
 import { pushPopText, buildPopTextEntries, prunePopTexts } from './popText.js';
 
 /**
+ * 世界实体全量重同步周期（tick 数）
+ *
+ * 增量渲染协议下，世界实体仅在「首次全量推送」或「数据发生变化」时发送，
+ * 客户端约定缺失实体沿用上一帧。若客户端因网络抖动 / 中继丢包 / 加入竞态
+ * 错过了首次全量推送，静态实体（墙体/标题/装饰）与长期不变更的动态实体
+ * 将永远不会再被发送 —— 而玩家每帧都在变化会持续重发，最终表现就是
+ * 「客户端只能看到玩家，看不到任何世界实体」。
+ *
+ * 该常量控制周期全量重同步：每经过 FULL_RESYNC_TICKS 个渲染 tick，
+ * 强制清空每个客户端的 seenEntities（及 seenGui），令下一次渲染请求
+ * 全量重推所有世界实体，保证任意客户端都能在有限时间内恢复完整世界。
+ *
+ * 100 tick = 5 秒（20 tick/s），全量包约 10KB，均摊带宽 ~2KB/s/客户端，
+ * 换取「初始推送丢失后最多 5 秒自动恢复」的可靠性保障。
+ */
+const FULL_RESYNC_TICKS = 100;
+
+/**
  * Game类
  * 游戏主逻辑
  * 以 sessionId 为 key 追踪玩家实体
@@ -31,6 +49,7 @@ class Game {
         /**
          * 各玩家渲染增量同步状态：sessionId → { lastSentTick, seenEntities, seenIds, seenPlayers, ...GUI }
          * - lastSentTick  上次发送渲染包时的全局渲染 tick（world.renderTick）
+         * - lastFullSyncTick 上次「全量重同步」时的渲染 tick（周期全量重推，防初始推送丢失）
          * - seenEntities  已发送过的实体对象集合（按引用追踪：地图存在同 id 的不同实体，
          *                如装饰 base_A 与动态 Base base_A，必须各自独立追踪）
          * - seenIds       已发送过的实体 id 集合（用于实体移除时判断是否发送 delete 包）
@@ -41,9 +60,10 @@ class Game {
          * - lastPopTextSeq 已投递的最大漂浮文字 seq（并入 S2CRender 后按玩家去重）
          * 客户端约定「缺失的实体沿用上一帧」，故未变化的数据无需重复发送。
          * @type {Object<string, {
-         *   lastSentTick: number, seenEntities: Set<object>, seenIds: Set<string>,
-         *   seenPlayers: Set<string>, seenGui: Set<object>, seenGuiIds: Set<string>,
-         *   pendingGuiRemovals: Array<{id:string}>, lastPopTextSeq: number,
+         *   lastSentTick: number, lastFullSyncTick: number, seenEntities: Set<object>,
+         *   seenIds: Set<string>, seenPlayers: Set<string>, seenGui: Set<object>,
+         *   seenGuiIds: Set<string>, pendingGuiRemovals: Array<{id:string}>,
+         *   lastPopTextSeq: number,
          * }>}
          */
         this._renderStates = {};
@@ -110,6 +130,8 @@ class Game {
                 // 初始化渲染增量同步状态（首次渲染全量发送，之后增量）
                 this._renderStates[sessionId] = {
                     lastSentTick: 0,
+                    // 周期全量重同步游标（0 = 立即允许首次全量，见 _buildRenderPacket）
+                    lastFullSyncTick: 0,
                     seenEntities: new Set(),
                     seenIds: new Set(),
                     seenPlayers: new Set(),
@@ -364,6 +386,23 @@ class Game {
         const state = this._renderStates[sessionId];
         // 渲染状态不存在（玩家刚被移除等竞态）→ 返回空包
         if (!state) return [];
+
+        // ---- 0. 周期全量重同步（防初始推送丢失） ----
+        // 世界实体仅在「首次全量」或「数据变化」时发送；若客户端因网络抖动 /
+        // 中继丢包 / 加入竞态错过了首次全量推送，静态实体（墙体/标题/装饰）与
+        // 长期不变更的动态实体将永远不会再被发送（玩家每帧变化仍会重发，表现
+        // 为“客户端只能看到玩家，看不到其他实体”）。
+        //
+        // 因此每 FULL_RESYNC_TICKS 个渲染 tick 强制清空 seenEntities / seenGui，
+        // 令本次渲染请求全量重推所有世界实体与 GUI 实体（幂等覆盖，客户端缓存
+        // 天然支持重复 update），保证任意客户端在有限时间内恢复完整世界。
+        // 注意：seenIds / seenPlayers 不清空 —— seenIds 用于已移除实体删除包去重，
+        // seenPlayers 避免全量重推玩家（玩家变化频繁本就持续重发）。
+        if (world.renderTick - state.lastFullSyncTick >= FULL_RESYNC_TICKS) {
+            state.seenEntities = new Set();
+            state.seenGui = new Set();
+            state.lastFullSyncTick = world.renderTick;
+        }
 
         const packet = [];
         const lastSentTick = state.lastSentTick;
