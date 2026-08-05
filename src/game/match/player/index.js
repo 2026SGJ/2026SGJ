@@ -46,11 +46,15 @@ const clamp01 = (v) => {
  *   三端共用一套按键状态（effectiveKeys = 键盘 heldKeys ∪ 手柄 _gamepadKeys ∪ 触屏 _touchKeys），
  *   可同时混用；右摇杆 / 瞄准摇杆 / 世界坐标点击提供瞄准方向（aimDir），影响道具发射方向。
  * 
- * 商店交互：
+ * 商店交互（重构后 — isFixed 屏幕实体 GUI）：
  * 1. 每 tick 检查是否靠近商店实体（60px）
- * 2. 玩家按下 E 键时，优先打开商店（发送 S2CShopOpen）
- * 3. 商店打开期间禁止移动
- * 4. 松开 E 键或离开商店范围时自动关闭商店
+ * 2. 玩家按 E 键时切换商店开关（E 边沿触发打开/关闭，优先级最高）
+ * 3. 商店打开后禁止移动/攻击/采矿，输入重定向到 GUI：
+ *      - 鼠标 / 触屏屏幕坐标点击商品 → 购买（C2SMouseEvent / C2STouch）
+ *      - 手柄右摇杆移动选中光标，A 键购买选中商品（映射 KeyR）
+ *      - E 键 / B 键 / 点击关闭按钮 → 关闭商店
+ * 4. 离开商店范围时自动关闭商店
+ * 5. 商店界面本身由 isFixed 实体经 S2CRender 渲染（见 ShopGui）
  * 
  * 开采机制：
  * 1. 每 tick 检查是否靠近矿物（30px），若靠近则设置 canMine 标志
@@ -115,7 +119,7 @@ class Player {
         // ---------- 商店交互相关 ----------
         /** @type {boolean} 玩家附近是否存在可交互的商店实体 */
         this.canShop = false;
-        /** @type {boolean} 当前 tick 是否刚刚打开了商店（用于发送 S2CShopOpen 消息） */
+        /** @type {boolean} 当前 tick 是否刚刚切换为打开商店（Game 层据此创建 ShopGui） */
         this.shopJustOpened = false;
         /** @type {boolean} 玩家是否正在浏览商店（打开商店后禁止移动，类似开采状态） */
         this.isShopOpen = false;
@@ -136,15 +140,16 @@ class Player {
         this.spawnOutpostTarget = null;
         // ---------- 前哨站重生点相关 ----------
 
-        /** @type {boolean} 当前 tick 是否按下 E 键且附近有商店 */
-        this._shopOpen = false;
-        /** @type {import('../entity/shop.js').default|null} 当前打开的商店引用 */
+        // ---------- 商店 GUI（isFixed 屏幕实体）相关 ----------
+        /** @type {import('../gui/shopGui.js').default|null} 当前打开的商店界面（null = 未打开） */
+        this._gui = null;
+        /** @type {import('../entity/shop.js').default|null} 当前打开的商店实体 */
         this._openShop = null;
-        /** @type {import('../entity/shop.js').default|null} 当前 tick 最近的可交互商店 */
-        this._nearestShop = null;
-        /** @type {boolean} 玩家附近是否存在可交互商店 */
-        this.canOpenShop = false;
-        // ---------- 商店交互相关 ----------
+        /** @type {{x:number,y:number}|null} 待处理的屏幕坐标点击（鼠标 / 触屏，交给 GUI 命中检测） */
+        this._pendingShopClick = null;
+        /** @type {boolean} 手柄 A 键已按下（购买当前选中商品，由 Game 层消费） */
+        this._pendingShopBuySelected = false;
+        // ---------- 商店 GUI 相关 ----------
 
         this.animateState = 'idle';
         this.eventHandlers = {};
@@ -195,14 +200,14 @@ class Player {
         this.cantAttack = false;
         // ---------- Buff/Debuff 状态标志 ----------
 
-        // ---------- 伤害漂浮文字（S2CPopText）----------
+        // ---------- 伤害漂浮文字（并入 S2CRender）----------
         /**
          * 每名攻击者的上次伤害漂浮文字发送时间戳
          * 用于节流：同一攻击者对同一目标的最短弹字间隔（避免 DoT 刷屏）
          * @type {Object<string, number>} attackerSessionId → timestamp
          */
         this._popTextLastSent = {};
-        // ---------- 伤害漂浮文字（S2CPopText）----------
+        // ---------- 伤害漂浮文字（并入 S2CRender）----------
 
         /** @type {Vec2} 上一次移动方向（用于道具发射方向） */
         this.lastMoveDir = new Vec2(this.dir > 0 ? 1 : -1, 0);
@@ -285,12 +290,15 @@ class Player {
             this.eventQueue.push(a);
         });
 
-        // 手柄 / 触屏事件（由 game/index.js 从网络层转发而来）
+        // 手柄 / 触屏 / 鼠标事件（由 game/index.js 从网络层转发而来）
         this.on('gamepadEvent', (a) => {
             this.eventQueue.push({ source: 'gamepad', data: a });
         });
         this.on('touchEvent', (a) => {
             this.eventQueue.push({ source: 'touch', data: a });
+        });
+        this.on('mouseEvent', (a) => {
+            this.eventQueue.push({ source: 'mouse', data: a });
         });
     }
 
@@ -336,12 +344,14 @@ class Player {
         while (this.eventQueue.length > 0) {
             const event = this.eventQueue.shift();
 
-            // 手柄 / 触屏输入：交给各自的归一化解析（不参与键盘按键状态）
+            // 手柄 / 触屏 / 鼠标输入：交给各自的归一化解析（不参与键盘按键状态）
             if (event && event.source) {
                 if (event.source === 'gamepad') {
                     this._normalizeGamepadEvent(event.data);
                 } else if (event.source === 'touch') {
                     this._normalizeTouchEvent(event.data);
+                } else if (event.source === 'mouse') {
+                    this._normalizeMouseEvent(event.data);
                 }
                 continue;
             }
@@ -568,6 +578,31 @@ class Player {
     }
 
     /**
+     * 解析 C2SMouseEvent 消息 → 鼠标点击状态（存于 this.lastClick）
+     *
+     * 与触屏点击约定一致：
+     *   - world=false（默认）：x / y 为视口归一化坐标（0~100）
+     *     商店 GUI 打开时用于商品命中检测；
+     *   - world=true：x / y 为世界坐标（用于瞄准）。
+     *
+     * 支持报文形态：
+     *   { x, y, world?: boolean, button?: number, type?: 'Click'|'MouseDown'|... }
+     *
+     * @param {Object} data - C2SMouseEvent 消息体
+     */
+    _normalizeMouseEvent(data) {
+        if (!data || typeof data !== 'object') return;
+        this.inputMode = 'keyboard';
+        if (data.x != null && data.y != null) {
+            this.lastClick = {
+                x: Number(data.x),
+                y: Number(data.y),
+                world: !!data.world,
+            };
+        }
+    }
+
+    /**
      * 将归一化的手柄状态折叠进 _gamepadKeys / aimDir
      * 每 tick 在 mergeInputKeys 之前调用（与键盘、触屏共用一套按键状态）
      *
@@ -599,9 +634,17 @@ class Player {
             this._gamepadKeys.add(ly < 0 ? 'KeyW' : 'KeyS');
         }
 
-        // ---- 右摇杆 → 瞄准 ----
+        // ---- 右摇杆：商店 GUI 打开时控制商品选中，否则瞄准 ----
         if (Math.abs(rx) > dz || Math.abs(ry) > dz) {
-            this._setAim(rx, ry);
+            if (this._gui) {
+                // 商店界面：右摇杆移动选中光标（带死区 + 累积阈值防抖）
+                this._gui.handleStick(rx, ry);
+            } else {
+                this._setAim(rx, ry);
+            }
+        } else if (this._gui) {
+            // 摇杆回中：衰减残留位移累积，防止下次推动时误跳格
+            this._gui.decayStick();
         }
 
         // ---- ABXY ----
@@ -720,8 +763,6 @@ class Player {
 
         // 重置开采状态：如果 E 键不在当前按键列表中，开采被打断
         this.mining = false;
-        // 重置商店打开状态：如果 E 键不在当前按键列表中，商店被打断
-        this._shopOpen = false;
 
         const key = this.effectiveKeys || [];
         const prevKey = this.prevHeldKeys || [];
@@ -730,6 +771,21 @@ class Player {
 
         // ---- 眩晕状态下跳过所有输入 ----
         if (this.stunned) {
+            this.prevHeldKeys = [...key];
+            return;
+        }
+
+        // ---- 商店界面打开：输入重定向（禁止攻击/技能/采矿） ----
+        if (this.isShopOpen && this._gui) {
+            // A 键（手柄 A / 键盘映射 KeyR）购买当前选中商品（边沿触发）
+            if (key.includes('KeyR') && !prevKey.includes('KeyR')) {
+                this._pendingShopBuySelected = true;
+            }
+            // E 键 / 手柄 B 键（映射 KeyE）关闭商店（边沿触发）
+            if (key.includes('KeyE') && !prevKey.includes('KeyE')) {
+                this.isShopOpen = false;
+                this.shopJustOpened = false;
+            }
             this.prevHeldKeys = [...key];
             return;
         }
@@ -807,37 +863,35 @@ class Player {
                 case 'KeyE':
                     // 匹配阶段禁止商店/采矿/重生点交互
                     if (!canAct) break;
-                    // 优先级1：商店 — 靠近商店时 E 键打开商店
-                    if (this.canShop && this.shopTarget) {
-                        // 仅在首次按下或未打开商店时触发打开
-                        if (!this.isShopOpen) {
-                            this.isShopOpen = true;
-                            this.shopJustOpened = true;
+                    // 边沿触发（首次按下）：商店切换开关（优先级最高）
+                    if (key.includes('KeyE') && !prevKey.includes('KeyE')) {
+                        if (this.canShop && this.shopTarget) {
+                            // 商店打开中 → 关闭；未打开 → 打开（Game 层据此创建 ShopGui）
+                            if (this.isShopOpen) {
+                                this.isShopOpen = false;
+                                this.shopJustOpened = false;
+                            } else {
+                                this.isShopOpen = true;
+                                this.shopJustOpened = true;
+                                this._openShop = this.shopTarget;
+                            }
                         }
-                        // 已打开商店后继续按 E 不做额外操作（防止反复开关）
+                        // 优先级2：前哨站 — 靠近己方占领的前哨站 25px 内按 E 设置重生点
+                        else if (this.canSetSpawn && this.spawnOutpostTarget) {
+                            this.spawnOutpostTarget.setSpawn(this);
+                        }
                     }
-                    // 优先级2：前哨站 — 靠近己方占领的前哨站 25px 内按 E 设置重生点
-                    else if (this.canSetSpawn && this.spawnOutpostTarget) {
-                        this.spawnOutpostTarget.setSpawn(this);
-                    }
-                    // 优先级3：采矿 — 没有商店/前哨站时，E 键正常采矿
-                    else if (this.canMine && this.miningTarget && !this.miningTarget.collected) {
+                    // 按住 E 且商店未打开 → 采矿（持续累积开采进度）
+                    if (!this.isShopOpen && this.canMine && this.miningTarget && !this.miningTarget.collected) {
                         this.mining = true;
-                    } else if (this.canOpenShop) {
-                        // 标记商店打开状态，Game 层监听 shopOpen 事件发送目录
-                        this._shopOpen = true;
                     }
                     break;
             }
         }
 
-        // 松开 E 键或失去开采/商店目标时，重置状态
+        // 松开 E 键或失去开采/商店目标时，重置开采进度
         if (!this.mining) {
             this.miningTime = 0;
-        }
-        // 若 E 键未按下，关闭商店
-        if (!key.includes('KeyE')) {
-            this.isShopOpen = false;
         }
 
         // 保存当前帧按键状态供下一帧比较
@@ -938,7 +992,7 @@ class Player {
      * 更新商店接近检测
      *
      * 检查玩家是否在商店实体的交互范围内。
-     * 若离开范围则关闭商店并重置相关状态。
+     * 若离开范围则自动关闭商店（Game 层据此销毁 ShopGui）。
      *
      * @param {import('../world.js').default} world - 世界实例
      */
@@ -952,6 +1006,16 @@ class Player {
             // 离开商店范围时自动关闭商店
             this.canShop = false;
             this.shopTarget = null;
+            if (this.isShopOpen) {
+                this.isShopOpen = false;
+                this.shopJustOpened = false;
+            }
+        }
+
+        // 已打开的商店实体不再在交互范围内（被推离等）→ 关闭
+        if (this._openShop && !this._openShop.isPlayerNear(this.x, this.y)) {
+            this._openShop.openedBy.delete(this.sessionId);
+            this._openShop = null;
             this.isShopOpen = false;
             this.shopJustOpened = false;
         }
@@ -1036,43 +1100,23 @@ class Player {
     }
 
     /**
-     * 处理商店打开/关闭信号的发送
-     * 
-     * 当玩家按 E 靠近商店时，通过 game.js 层管理器发送目录；
-     * 当玩家远离商店或松开 E，自动关闭商店。
-     * 
-     * @param {import('../world.js').default} world
+     * 处理屏幕坐标点击（商店 GUI 命中检测）
+     *
+     * 鼠标（C2SMouseEvent）与触屏（C2STouch world:false）的屏幕坐标点击
+     * 统一经 lastClick 汇聚；商店 GUI 打开时，屏幕坐标点击转为待购买意图
+     * （_pendingShopClick），由 Game._syncShopGui 完成命中检测与购买。
+     * 消费后清空 lastClick 与触屏缓存，避免同一点击重复触发。
      */
-    processShopOpen(world) {
-        if (this._shopOpen && this.canOpenShop) {
-            // 查找最近的商店
-            let nearest = null;
-            let nearestDist = Infinity;
-            for (const shop of world.shops) {
-                if (!shop.isPlayerNear(this.x, this.y)) continue;
-                const dist = Math.hypot(this.x - shop.data.x, this.y - shop.data.y);
-                if (dist < nearestDist) {
-                    nearestDist = dist;
-                    nearest = shop;
-                }
-            }
-            if (nearest) {
-                // 记录最近商店，供 game.js shopOpen 处理器使用
-                this._nearestShop = nearest;
-            }
-        } else {
-            // 未按 E 或离开范围 → 关闭商店（由 Game 层处理）
-            this._nearestShop = null;
-        }
-
-        // 自动关闭：如果商店已打开但玩家离开交互范围
-        if (this._openShop && !this._openShop.isPlayerNear(this.x, this.y)) {
-            this._openShop.openedBy.delete(this.sessionId);
-            this._openShop = null;
-            this._shopOpen = false;
-            this.canOpenShop = false;
-            // 通知 Game 层关闭（通过触发 shopClose event）
-            this.trigger('shopAutoClose', { sessionId: this.sessionId });
+    processGuiClick() {
+        if (!this._gui) return;
+        if (this.lastClick && !this.lastClick.world) {
+            this._pendingShopClick = {
+                x: this.lastClick.x,
+                y: this.lastClick.y,
+            };
+            this.lastClick = null;
+            // 触屏点击是持续性状态（每 tick 重读），消费后必须清空
+            if (this._touchState) this._touchState.click = null;
         }
     }
 
@@ -1459,7 +1503,8 @@ class Player {
         this.updateOutpostProximity(world);
         this.processKeyholding();
         this.processMining();
-        this.processShopOpen(world);
+        // 屏幕坐标点击（鼠标 / 触屏）→ 商店 GUI 命中检测意图
+        this.processGuiClick();
         this.move(world);
         this.processSkills(players);
         this.processBuffs();
@@ -1546,7 +1591,7 @@ class Player {
             this.onDeath();
         }
 
-        // ----- 伤害漂浮文字（S2CPopText）-----
+        // ----- 伤害漂浮文字（并入 S2CRender 渲染管线）-----
         // 仅当伤害由他人造成时触发（排除环境伤害 / 自身伤害），
         // 并按攻击者节流，避免持续伤害（毒/灼烧）每 tick 刷屏。
         if (attacker && attacker !== this && finalAmount > 0) {
@@ -1591,16 +1636,15 @@ class Player {
             this.cantAttack = false;
             this.damageReduction = 0;
             this._popTextLastSent = {};
-            // 死亡时强制关闭商店
+            // 死亡时强制关闭商店（Game._syncShopGui 会据此销毁 ShopGui）
             this.isShopOpen = false;
             this.shopJustOpened = false;
+            this._pendingShopClick = null;
+            this._pendingShopBuySelected = false;
             if (this._openShop) {
                 this._openShop.openedBy.delete(this.sessionId);
                 this._openShop = null;
             }
-            this._shopOpen = false;
-            this.canOpenShop = false;
-            this._nearestShop = null;
             console.log(`Player ${this.sessionId} 无法复活（基地被毁或加时赛），保持阵亡状态`);
             return;
         }
@@ -1651,13 +1695,12 @@ class Player {
         // 如果希望死亡掉落，可取消下面注释：
         // this.inventory.clear();
         // 清理商店状态
+        this._pendingShopClick = null;
+        this._pendingShopBuySelected = false;
         if (this._openShop) {
             this._openShop.openedBy.delete(this.sessionId);
             this._openShop = null;
         }
-        this._shopOpen = false;
-        this.canOpenShop = false;
-        this._nearestShop = null;
     }
 
     giveBuff(buff) {

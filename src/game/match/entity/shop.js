@@ -17,8 +17,9 @@ import getBuffClassById from '../buff/index.js';
  * 并发处理说明：
  * 服务端运行在单线程同步主循环（matchLoop）中。购买在单个同步调用内完成，
  * 库存扣减与金钱扣减在返回前一次性写完，对同一商品不存在中途被打断的写;
- * 即便客户端在一个 tick 内连发多笔 C2SShopBuy，也会被事件队列串行处理，
- * 每次购买都基于「当前已最新」的 stock 判定，天然并发安全。
+ * 即便客户端在一个 tick 内连发多笔购买（鼠标 / 触屏 / 手柄），也会被
+ * Game._syncShopGui 串行处理，每次购买都基于「当前已最新」的 stock 判定，
+ * 天然并发安全。
  */
 class Shop extends Entity {
     /**
