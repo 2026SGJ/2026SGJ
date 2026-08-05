@@ -126,7 +126,7 @@ const buildPacket = (sid) => {
     }
     for (const gone of world._pendingRemovals) {
         if (state.seenIds.has(gone.id) || state.seenPlayers.has(gone.id)) {
-            packet.push({ id: gone.id, type: gone.type, isShowed: false });
+            packet.push({ type: 'delete', id: gone.id });
             state.seenIds.delete(gone.id);
             state.seenPlayers.delete(gone.id);
         }
