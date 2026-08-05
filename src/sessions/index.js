@@ -172,6 +172,8 @@ room.onMessage('C2SUseItem', (message) => {
     }
     const uuid = message.who.extra.uuid;
     playerEvent.trigger('useItem', { sessionId, uuid, event: message.msg });
+});
+
 //  C2SShopBuy — 商店购买请求
 // ============================================================
 room.onMessage('C2SShopBuy', (message) => {
