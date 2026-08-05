@@ -231,6 +231,28 @@ class Player {
         this._reboundPercent = 0;         // 反弹比例（被 ReboundBuff 修改）
         // ---------- Buff 叠加属性 ----------
 
+        // ---------- 渲染增量同步（带宽优化） ----------
+        /**
+         * 最近一次渲染数据的 JSON 指纹（由 Game 主循环每 tick 刷新比对），
+         * 用于判断本玩家渲染数据是否发生变化：静止 / 无冷却的玩家不变化，
+         * 可跳过发送（客户端缺失该玩家时沿用上一帧）。
+         * @type {string|null}
+         */
+        this._renderFingerprint = null;
+        /**
+         * 渲染数据最后变化的全局渲染 tick（world.renderTick），
+         * 渲染组装时与各客户端上次发送 tick 比较，决定是否需要发送。
+         * @type {number}
+         */
+        this._lastChangeTick = 0;
+        /**
+         * 最近一次构建的渲染数据对象（remoteData() 结果，组装时复用），
+         * 避免同一 tick 内多个客户端请求时重复构建。
+         * @type {Object|null}
+         */
+        this._lastRenderData = null;
+        // ---------- 渲染增量同步 ----------
+
         // ---------- 三端操作支持（键盘 / 手柄 / 触屏） ----------
         /**
          * 当前输入设备：'keyboard' | 'gamepad' | 'touch'
@@ -1298,6 +1320,17 @@ class Player {
 
     // ---------- 网络同步 ----------
 
+    /**
+     * 坐标精度裁剪：保留 0.1 像素精度（渲染精度足够），
+     * 避免浮点累积误差（如 1280.0000000001）撑大 JSON 体积。
+     * 仅用于渲染数据，不影响内部逻辑坐标。
+     * @param {number} v - 原始坐标值
+     * @returns {number} 裁剪后的坐标值
+     */
+    static _trimCoord(v) {
+        return Math.round(v * 10) / 10;
+    }
+
     remoteData() {
         // 构建技能状态信息（供客户端 UI 展示）
         const skillStates = {};
@@ -1316,8 +1349,9 @@ class Player {
 
         return {
             type: 'update',
-            x: this.x,
-            y: this.y,
+            // 坐标裁剪到 0.1px 精度（渲染精度足够，大幅减小 JSON 体积）
+            x: Player._trimCoord(this.x),
+            y: Player._trimCoord(this.y),
             asset: this.costume,
             isShowed: !this.dead, // 死亡玩家不再显示（客户端可隐藏模型）
             id: this.sessionId,
@@ -1351,9 +1385,22 @@ class Player {
                 // 三端输入状态（客户端可据此切换操作提示 UI）
                 inputMode: this.inputMode,
                 aiming: this._aimUntil > Date.now(),
-                aimDir: JSON.stringify({ x: this.aimDir.x, y: this.aimDir.y }),
-                lastClick: this.lastClick,
-                speed: JSON.stringify({ x: this.speed.x, y: this.speed.y }),
+                // 瞄准方向：保持客户端约定的字符串格式，仅裁剪数值精度（0.01）
+                aimDir: JSON.stringify({
+                    x: Math.round(this.aimDir.x * 100) / 100,
+                    y: Math.round(this.aimDir.y * 100) / 100,
+                }),
+                // 点击坐标：保持对象格式，仅裁剪数值精度（0.1）
+                lastClick: this.lastClick ? {
+                    x: Player._trimCoord(this.lastClick.x),
+                    y: Player._trimCoord(this.lastClick.y),
+                    world: this.lastClick.world,
+                } : null,
+                // 速度：保持客户端约定的字符串格式，仅裁剪数值精度（0.1）
+                speed: JSON.stringify({
+                    x: Player._trimCoord(this.speed.x),
+                    y: Player._trimCoord(this.speed.y),
+                }),
                 buffs: this.buffs.map(b => ({
                     id: b.id,
                     level: b.level,
@@ -1420,6 +1467,13 @@ class Player {
         this.costume = `${this.hero}_${this.animate()}`;
     }
 
+    /**
+     * [废弃] 旧全量渲染管线入口（不再被调用）
+     *
+     * S2CRender 已改为 Game._buildRenderPacket 的增量同步：
+     * 首次全量建立客户端缓存，之后仅发送变化的实体/玩家。
+     * 该方法及其依赖的 World.culling 保留仅供参考 / 按视野裁剪扩展。
+     */
     render(f) {
         let entities = f(this.x, this.y, 320, 180);
         let renderData = [];
