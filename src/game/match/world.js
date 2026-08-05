@@ -46,10 +46,11 @@ class World {
          */
         this.renderTick = 0;
         /**
-         * 待通知客户端的「已移除实体」列表（{ id, type, removedAtTick }）。
+         * 待通知客户端的「已移除实体」列表（{ id, removedAtTick }）。
          * 客户端采用「缺失沿用上一帧」设计，因此实体从世界中移除时必须显式
-         * 发送 isShowed:false 隐藏包，否则会残留幽灵渲染。
-         * @type {Array<{id: string, type: string, removedAtTick: number}>}
+         * 发送 { type:'delete', id } 删除包，通知客户端停止跟踪并释放缓存，
+         * 否则会残留幽灵渲染并导致客户端内存泄漏。
+         * @type {Array<{id: string, removedAtTick: number}>}
          */
         this._pendingRemovals = [];
         // ---------- 渲染增量同步 ----------
@@ -174,14 +175,15 @@ class World {
     }
 
     /**
-     * 记录一个实体的移除，供渲染组装时向客户端发送 isShowed:false 隐藏包
+     * 记录一个实体的移除，供渲染组装时向客户端发送 { type:'delete', id } 删除包，
+     * 通知客户端停止跟踪该实体并释放缓存（避免 isShowed:false 只隐藏不释放导致的内存泄漏）
      * （通用入口：道具实体自毁 / 玩家离开 / 人机被踢均复用）
      *
-     * @param {{id: string, type: string}} entity — 至少包含渲染 id 与 type
+     * @param {{id: string}} entity — 至少包含渲染 id
      */
-    markEntityRemoved({ id, type }) {
+    markEntityRemoved({ id }) {
         if (!id) return;
-        this._pendingRemovals.push({ id, type, removedAtTick: this.renderTick });
+        this._pendingRemovals.push({ id, removedAtTick: this.renderTick });
     }
 
     /**
@@ -226,9 +228,9 @@ class World {
         if (eIdx !== -1) {
             this.entities.splice(eIdx, 1);
         }
-        // 记录移除：增量渲染下客户端沿用上一帧，需显式发送隐藏包
-        // type 统一为 'update'（与常规渲染条目协议一致）
-        this.markEntityRemoved({ id: entity.data.id, type: 'update' });
+        // 记录移除：增量渲染下客户端沿用上一帧，需显式发送 delete 包，
+        // 通知客户端停止跟踪该实体并释放缓存
+        this.markEntityRemoved({ id: entity.data.id });
     }
 
     /**
@@ -324,7 +326,7 @@ class World {
      *
      * 增量渲染下静态实体只发一次、动态实体变化才发，全量广播成本已大幅降低；
      * 如需进一步按玩家视野裁剪可见实体，可在此实现（注意离开视野的实体
-     * 需要配合 isShowed:false 隐藏包，避免客户端沿用旧帧残留）。
+     * 需要配合 { type:'delete', id } 删除包，避免客户端沿用旧帧残留）。
      */
     culling (x, y, halfw, halfh) {
         // 返回所有实体（包括道具实体），保证渲染完整

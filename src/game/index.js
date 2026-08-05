@@ -32,7 +32,7 @@ class Game {
          * - lastSentTick  上次发送渲染包时的全局渲染 tick（world.renderTick）
          * - seenEntities  已发送过的实体对象集合（按引用追踪：地图存在同 id 的不同实体，
          *                如装饰 base_A 与动态 Base base_A，必须各自独立追踪）
-         * - seenIds       已发送过的实体 id 集合（用于实体移除时判断是否发送隐藏包）
+         * - seenIds       已发送过的实体 id 集合（用于实体移除时判断是否发送 delete 包）
          * - seenPlayers   已发送过的玩家 sessionId 集合
          * 客户端约定「缺失的实体沿用上一帧」，故未变化的数据无需重复发送。
          * @type {Object<string, {lastSentTick: number, seenEntities: Set<object>, seenIds: Set<string>, seenPlayers: Set<string>}>}
@@ -125,9 +125,9 @@ class Game {
                 delete this.players[sessionId];
                 delete this._renderStates[sessionId];
                 console.log(`Player removed: sessionId=${sessionId}, uuid=${uuid}`);
-                // 增量渲染下客户端沿用上一帧：移除玩家必须显式通知其他客户端隐藏，
-                // 避免残留幽灵（isShowed:false 隐藏包由渲染组装时消费，type 与常规条目一致）
-                this.world.markEntityRemoved({ id: sessionId, type: 'update' });
+                // 增量渲染下客户端沿用上一帧：移除玩家必须显式通知其他客户端不再跟踪，
+                // 避免残留幽灵与内存泄漏（delete 包由渲染组装时消费，通知客户端释放缓存）
+                this.world.markEntityRemoved({ id: sessionId });
                 // 通知匹配管理器：真人离开（匹配中重新补人机 / 对局中补位保持 4v4）
                 this.match.onHumanLeft(sessionId, team);
             }
@@ -523,7 +523,7 @@ class Game {
      *   1. 首次出现的实体 / 玩家（全量推送一次，建立客户端缓存）
      *   2. 自上次发送以来渲染数据发生变化（_lastChangeTick > lastSentTick，
      *      严格大于：上次发送时已包含该 tick 的变化）的实体 / 玩家
-     *   3. 已从世界移除的实体（发送 isShowed:false 隐藏包，防止客户端残留幽灵）
+     *   3. 已从世界移除的实体（发送 { type:'delete', id } 删除包，通知客户端停止跟踪并释放缓存）
      *
      * 静态实体（墙体 / 标题 / 装饰）永不变化：首次全量后不再发送，
      * 动态实体（矿物 / 前哨站 / 商店 / 基地 / 道具）仅在变化时发送，
@@ -559,13 +559,15 @@ class Game {
             }
         }
 
-        // ---- 2. 已移除实体 → 显式隐藏包（isShowed:false） ----
-        // 仅通知「已见过该 id」的玩家（从未见过的无需隐藏）；
+        // ---- 2. 已移除实体 → 显式删除包（{ type:'delete', id }） ----
+        // 仅通知「已见过该 id」的玩家（从未见过的无需通知）。
+        // 客户端收到 delete 后停止跟踪该实体并释放其缓存；isShowed:false 仅隐藏不释放，
+        // 会导致客户端持续追踪实体造成内存泄漏，故必须使用 delete 语义。
         // 每个玩家的 seen 集合相互独立，故此处可消费式删除：
-        // 该隐藏包对当前玩家只发一次，其他玩家仍会各自收到。
+        // 该删除包对当前玩家只发一次，其他玩家仍会各自收到。
         for (const gone of world._pendingRemovals) {
             if (state.seenIds.has(gone.id) || state.seenPlayers.has(gone.id)) {
-                packet.push({ id: gone.id, type: gone.type, isShowed: false });
+                packet.push({ type: 'delete', id: gone.id });
                 state.seenIds.delete(gone.id);
                 state.seenPlayers.delete(gone.id);
             }
