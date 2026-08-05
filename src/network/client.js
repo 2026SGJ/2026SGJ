@@ -51,6 +51,9 @@ const joinRoom = async (server, roomType, projectId, roomId, auth) => {
             extra: auth.extra,
             filter: { name: 'match'}
         }, GameState);
+        room.onError((code, message) => {
+            console.error(code, message);
+        });
         return room;
     } catch (error) {
         console.error("Failed to join room:", error);
