@@ -8,7 +8,7 @@
  *   - 客户端可正常渲染（remoteData 格式一致）
  *
  * 与真实玩家的唯一区别：
- *   - 输入来源：FSM 控制器 + 可选 LLM 决策，而非键盘网络事件
+ *   - 输入来源：行为树控制器（BotController）+ 可选 LLM 决策，而非键盘网络事件
  *   - 不接收网络消息推送（跳过 _syncInventory 等）
  */
 
@@ -36,7 +36,7 @@ export default class BotPlayer extends Player {
         this.sessionId = sessionId;
 
         /**
-         * FSM + LLM 行为控制器
+         * 行为树 + LLM 行为控制器
          * @type {BotController}
          */
         this.botController = new BotController({
@@ -52,7 +52,7 @@ export default class BotPlayer extends Player {
     // ==================== 主 tick 覆写 ====================
 
     /**
-     * 每帧更新：FSM 决策 → 执行动作 → 标准物理/skill/buff 处理
+     * 每帧更新：行为树决策 → 执行动作 → 标准物理/skill/buff 处理
      *
      * 跳过了：
      *   - processEvents()     — Bot 无键盘事件
@@ -66,7 +66,7 @@ export default class BotPlayer extends Player {
         this._worldRef = world;
         this._playersRef = players;
 
-        // ---- 1. FSM + LLM 决策：直接设置 this.dx/dy/attacking/mining 等 ----
+        // ---- 1. 行为树决策：直接设置 this.dx/dy/attacking/mining 等 ----
         this.botController.update(players, world, this);
 
         // ---- 2. 环境检测（矿物、商店、前哨站接近判断） ----
