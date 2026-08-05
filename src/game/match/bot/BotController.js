@@ -173,10 +173,28 @@ export default class BotController {
         this.tickCount++;
         this.self = self;
 
+        // ---- 已死亡且无法复活：保持静止 ----
+        if (self.dead) {
+            self.dx = 0;
+            self.dy = 0;
+            self.attacking = false;
+            self.mining = false;
+            self.usingSkill = false;
+            return;
+        }
+
         // ---- 眩晕时无法行动 ----
         if (self.stunned) {
             self.dx = 0;
             self.dy = 0;
+            return;
+        }
+
+        // ---- 匹配阶段：与真人同权，仅可移动（游荡），禁止攻击/采矿/购物 ----
+        // canAct 由 MatchManager 在阶段切换时统一设置
+        if (!self.canAct) {
+            this._resetGoals(self);
+            this._actWander();
             return;
         }
 
@@ -961,6 +979,31 @@ export default class BotController {
     }
 
     // ==================== 辅助方法 ====================
+
+    /**
+     * 清除所有行为树目标与激活标志（用于匹配阶段等禁止行动的场合）
+     * 确保切换到游荡时不会残留战斗/采矿/购物/占领状态
+     * @param {import('../player/index.js').default} self
+     */
+    _resetGoals(self) {
+        this.combatTarget = null;
+        this.mineralTarget = null;
+        this.shopTargetObj = null;
+        this.outpostTarget = null;
+        this.fleeActive = false;
+        this.shoppingActive = false;
+        this.capturingActive = false;
+        this._shopDecision = null;
+        this._captureDecision = null;
+        this.llmFleeRequested = false;
+        this.llmCachedDecision = null;
+        self.mining = false;
+        self.miningTime = 0;
+        self.attacking = false;
+        self.usingSkill = false;
+        self.shopJustOpened = false;
+        if (self.isShopOpen) self.isShopOpen = false;
+    }
 
     /** 记录当前动作（仅在变化时打印日志） */
     _setAction(name) {

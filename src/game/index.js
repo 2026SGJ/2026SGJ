@@ -1,9 +1,10 @@
 import { matchLoop } from './mainloop.js';
 import playerEvent from '../sessions/index.js';
 import Player from './match/player/index.js';
-import BotPlayer, { BOT_PREFIX } from './match/bot/BotPlayer.js';
+import BotPlayer from './match/bot/BotPlayer.js';
 import World from './match/world.js';
 import room from '../network/index.js';
+import MatchManager from './match/manager.js';
 import { render, renderBatch} from './render.js';
 import Shop from './match/item/shop.js';
 import { flushPopText } from './popText.js';
@@ -21,8 +22,12 @@ class Game {
         this.renderBuffer = {};  // sessionId → Array<RenderData>
         /** @type {number} Bot 编号计数器 */
         this.botCounter = 0;
-        /** @type {Object<string, string>} 人类玩家 → 关联 Bot 的映射 */
-        this.humanToBot = {};
+        /**
+         * 对局匹配 / 阶段 / 胜负判定管理器
+         * 负责匹配倒计时、人机补位、基地伤害、死绝判负、强制结算等
+         * @type {MatchManager}
+         */
+        this.match = new MatchManager(this);
         this.init();
     }
 
@@ -34,6 +39,8 @@ class Game {
         // 主循环：每 tick 更新玩家和世界，随后同步物品栏
         this.matchLoop = setInterval(() => {
             matchLoop(this.players, this.world);
+            // 对局匹配 / 阶段 / 胜负判定管理（匹配广播、人机补位、基地伤害、死绝判负等）
+            this.match.tick();
             // 广播本 tick 内产生的漂浮文字（伤害显示 S2CPopText）
             flushPopText(this.players);
             // 同步所有玩家的物品栏（仅在变动时发送）
@@ -46,6 +53,16 @@ class Game {
 
         playerEvent.on('beforeNewPlayerAdded', ({ sessionId, uuid, event }) => {
             try {
+                // ---------- 满员 / 非匹配阶段：拒绝加入 ----------
+                // 匹配阶段满 8 名真人（4v4 满员），或对局已开始后，不再接受新玩家
+                if (this.match.phase !== 'matching' || this.match.realPlayerCount() >= 8) {
+                    console.log(
+                        `[Match] 拒绝玩家加入 ${sessionId} ` +
+                        `（阶段=${this.match.phase}，真人=${this.match.realPlayerCount()}/8）`
+                    );
+                    return false;
+                }
+
                 const data = JSON.parse(event).data;
 
                 // ---------- 队伍分配 ----------
@@ -71,40 +88,10 @@ class Game {
 
                 this.players[sessionId] = new Player(sessionId, data);
                 console.log(`Player added: sessionId=${sessionId}, uuid=${uuid}`);
-                const i = this.players[sessionId];
                 this.renderBuffer[sessionId] = [];
 
-                // ---------- 创建敌方人机 Bot ----------
-                const enemyTeam = assignedTeam === 'A' ? 'B' : 'A';
-                this.botCounter++;
-                const botSessionId = `${BOT_PREFIX}${this.botCounter}`;
-                const botData = { team: enemyTeam, hero: 'newton' };
-                this.players[botSessionId] = new BotPlayer(botSessionId, botData);
-                this.humanToBot[sessionId] = botSessionId;
-                console.log(
-                    `[Bot] 敌方人机已创建: ${botSessionId}, ` +
-                    `team=${enemyTeam}, 对应人类玩家=${sessionId}`
-                );
-                // ---------- 创建敌方人机 Bot ----------
-                // setInterval(() => {
-                //     if (this.renderBuffer[sessionId].length > 2) return; // 如果渲染缓冲区过长，跳过本次渲染
-                //     const startTime = Date.now();
-                //     const otherPlayersData = [];
-                //     for (const [id, player] of Object.entries(this.players)) {
-                //         if (id !== sessionId) {
-                //             otherPlayersData.push(player.remoteData());
-                //         }
-                //     }
-                //     const selfRender = i.render(this.world.culling.bind(this.world));
-                //     // render(sessionId, [...selfRender, ...otherPlayersData]);
-                //     const data = [...selfRender, ...otherPlayersData];
-                //     // this.renderBuffer[sessionId].push(data);
-                //     render(sessionId, data);
-                //     const endTime = Date.now();
-                //     if (endTime - startTime > 50) {
-                //         console.warn(`渲染耗时过长: ${endTime - startTime}ms`);
-                //     }
-                // }, 1000 / 20); // 每秒20帧
+                // 通知匹配管理器：真人加入（匹配阶段禁止行动、踢人机、调整倒计时）
+                this.match.onHumanJoined(sessionId);
                 return true;
             } catch (_) {
                 console.error(_);
@@ -112,18 +99,16 @@ class Game {
             }
         });
 
-        // 玩家移除（含 Bot 清理）
+        // 玩家移除（含对局内人机补位）
         playerEvent.on('playerRemoved', ({ sessionId, uuid, event }) => {
-            if (this.players[sessionId]) {
+            const removed = this.players[sessionId];
+            if (removed) {
+                const team = removed.team;
                 delete this.players[sessionId];
+                delete this.renderBuffer[sessionId];
                 console.log(`Player removed: sessionId=${sessionId}, uuid=${uuid}`);
-            }
-            // 若该玩家有关联 Bot，同步移除
-            const linkedBot = this.humanToBot[sessionId];
-            if (linkedBot && this.players[linkedBot]) {
-                delete this.players[linkedBot];
-                delete this.humanToBot[sessionId];
-                console.log(`[Bot] 关联人机已移除: ${linkedBot} (人类玩家已离开)`);
+                // 通知匹配管理器：真人离开（匹配中重新补人机 / 对局中补位保持 4v4）
+                this.match.onHumanLeft(sessionId, team);
             }
         });
 
@@ -136,12 +121,40 @@ class Game {
             } catch (_) {}
         });
 
+        // 游戏手柄事件（C2SGamepad / C2SGamepadEvent）
+        playerEvent.on('gamepadEvent', ({ sessionId, uuid, event }) => {
+            const player = this.players[sessionId];
+            if (!player) return;
+            try {
+                const msg = typeof event === 'string' ? JSON.parse(event) : event;
+                player.trigger('gamepadEvent', msg && msg.data !== undefined ? msg.data : msg);
+            } catch (_) {}
+        });
+
+        // 移动端触屏事件（C2STouch / C2STouchEvent）
+        playerEvent.on('touchEvent', ({ sessionId, uuid, event }) => {
+            const player = this.players[sessionId];
+            if (!player) return;
+            try {
+                const msg = typeof event === 'string' ? JSON.parse(event) : event;
+                player.trigger('touchEvent', msg && msg.data !== undefined ? msg.data : msg);
+            } catch (_) {}
+        });
+
         // ============================================================
         //  道具购买（物品栏系统 — C2SBuyItem）
         // ============================================================
         playerEvent.on('buyItem', ({ sessionId, uuid, event }) => {
             const player = this.players[sessionId];
             if (!player) return;
+            // 仅正常对局阶段允许购买（匹配阶段 / 7 分钟后加时赛禁止）
+            if (!this.match.canOpenShop()) {
+                room.send('S2CBuyItem', JSON.stringify({
+                    dest: sessionId, seq: 0,
+                    data: { success: false, reason: '当前阶段无法购买道具' }
+                }));
+                return;
+            }
             try {
                 const data = JSON.parse(event).data;
                 const itemId = data.itemId;
@@ -176,6 +189,14 @@ class Game {
         playerEvent.on('useItem', ({ sessionId, uuid, event }) => {
             const player = this.players[sessionId];
             if (!player) return;
+            // 匹配阶段禁止使用道具（正常对局与加时赛允许）
+            if (!this.match.canUseItems()) {
+                room.send('S2CUseItem', JSON.stringify({
+                    dest: sessionId, seq: 0,
+                    data: { success: false, reason: '当前阶段无法使用道具' }
+                }));
+                return;
+            }
             try {
                 const data = JSON.parse(event).data;
                 const itemId = data.itemId;
@@ -228,6 +249,12 @@ class Game {
             const player = this.players[sessionId];
             if (!player) return;
 
+            // 仅正常对局阶段允许打开商店（匹配阶段 / 7 分钟后加时赛禁止）
+            if (!this.match.canOpenShop()) {
+                this._sendShopError(sessionId, 'shop_disabled');
+                return;
+            }
+
             // 使用 player tick 中预计算的最近商店
             const shop = player._nearestShop || this.findNearestShop(player);
             if (!shop) {
@@ -273,6 +300,12 @@ class Game {
         playerEvent.on('shopBuy', ({ sessionId, event }) => {
             const player = this.players[sessionId];
             if (!player) return;
+
+            // 仅正常对局阶段允许购买（匹配阶段 / 7 分钟后加时赛禁止）
+            if (!this.match.canOpenShop()) {
+                this._sendShopError(sessionId, 'shop_disabled');
+                return;
+            }
 
             // 解析购买请求
             let itemId;

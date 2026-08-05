@@ -103,29 +103,50 @@ room.onMessage('C2SMouseEvent', (message) => {
     playerEvent.trigger('mouseEvent', { sessionId, uuid, event: message.msg });
 });
 
-room.onMessage('C2SGamepadEvent', (message) => {
+// ============================================================
+//  C2SGamepad / C2SGamepadEvent — 游戏手柄事件（三端操作）
+//  客户端上报左右双摇杆 + 扳机 + ABXY，数据格式：
+//    {
+//      type: 'GamepadHolding' | 'GamepadState' | 'GamepadChanged',
+//      axes:    { leftX, leftY, rightX, rightY } | [lx, ly, rx, ry],
+//      buttons: { a, b, x, y, lb, rb, lt, rt }    | [{pressed}, ...]
+//    }
+// ============================================================
+const handleGamepadMessage = (message) => {
     const sessionId = message.who.sessionId;
 
     if (!activeSessions.has(sessionId)) {
-        console.log(`C2SGamepadEvent from unknown session ${sessionId} ignored.`);
+        console.log(`C2SGamepad from unknown session ${sessionId} ignored.`);
         return;
     }
 
     const uuid = message.who.extra.uuid;
     playerEvent.trigger('gamepadEvent', { sessionId, uuid, event: message.msg });
-});
+};
+room.onMessage('C2SGamepad', handleGamepadMessage);
+room.onMessage('C2SGamepadEvent', handleGamepadMessage);
 
-room.onMessage('C2STouchEvent', (message) => {
+// ============================================================
+//  C2STouch / C2STouchEvent — 移动端触屏事件（三端操作）
+//  客户端约定：
+//   - 点击虚拟按键或虚拟摇杆 → 上报虚拟数据：
+//       { virtual: true, type: 'joystick'|'button', control: 'move'|'aim'|'attack'|..., x, y, pressed }
+//   - 未点击虚拟按键 → 上报点击坐标：
+//       { virtual: false, x, y, world: false|true }
+// ============================================================
+const handleTouchMessage = (message) => {
     const sessionId = message.who.sessionId;
 
     if (!activeSessions.has(sessionId)) {
-        console.log(`C2STouchEvent from unknown session ${sessionId} ignored.`);
+        console.log(`C2STouch from unknown session ${sessionId} ignored.`);
         return;
     }
 
     const uuid = message.who.extra.uuid;
     playerEvent.trigger('touchEvent', { sessionId, uuid, event: message.msg });
-});
+};
+room.onMessage('C2STouch', handleTouchMessage);
+room.onMessage('C2STouchEvent', handleTouchMessage);
 
 // ============================================================
 //  C2SBuyItem — 购买道具请求

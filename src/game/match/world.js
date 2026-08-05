@@ -5,6 +5,7 @@ import Wall from './entity/wall.js';
 import Mineral from './entity/mineral.js';
 import Outpost from './entity/outpost.js';
 import Shop from './entity/shop.js';
+import Base from './entity/base.js';
 
 class World {
     constructor({ map_id }) {
@@ -30,6 +31,12 @@ class World {
          * @type {Outpost[]}
          */
         this.outposts = [];
+        /**
+         * 基地实体列表（A/B 两队各一个，血量固定 4000）
+         * 由 MatchManager 每 tick 结算基地伤害与复活资格
+         * @type {Base[]}
+         */
+        this.bases = [];
         this.init();
     }
 
@@ -71,8 +78,42 @@ class World {
                 console.log(`[World] 商店实体已加载: id=${entity.id}, 位置 (${entity.x}, ${entity.y})`);
                 continue;
             }
+            // 初始化基地实体（若地图定义了 base 类型实体）
+            if (entity.type === 'base') {
+                const baseEntity = new Base(entity);
+                this.bases.push(baseEntity);
+                this.entities.push(baseEntity);
+                console.log(`[World] 基地实体已加载: id=${entity.id}, 队伍=${entity.team}, 位置 (${entity.x}, ${entity.y})`);
+                continue;
+            }
             this.entities.push(new Entity(entity));
         }
+
+        // 若地图未定义基地实体，则按双方出生点创建默认基地
+        // A 队出生点（底部 1280, 6840），B 队出生点（顶部 1280, 360）
+        if (this.bases.length === 0) {
+            this._addDefaultBases();
+        }
+    }
+
+    /**
+     * 创建默认基地（A/B 各一个，位于各自出生点）
+     * 基地为非阻挡实体，血量固定 4000，供渲染与 MatchManager 结算使用
+     */
+    _addDefaultBases() {
+        const baseA = new Base({
+            id: 'base_A', type: 'base', team: 'A',
+            x: 1280, y: 6840, asset: 'base_A',
+            width: 180, height: 180, isShowed: true, dir: 0, z_index: 2,
+        });
+        const baseB = new Base({
+            id: 'base_B', type: 'base', team: 'B',
+            x: 1280, y: 360, asset: 'base_B',
+            width: 180, height: 180, isShowed: true, dir: 0, z_index: 2,
+        });
+        this.bases.push(baseA, baseB);
+        this.entities.push(baseA, baseB);
+        console.log('[World] 默认基地已创建: A(1280,6840) / B(1280,360)，血量 4000');
     }
 
     /**
@@ -110,6 +151,8 @@ class World {
         }
 
         // ---- 更新前哨站占领进度 ----
+        // 注意：匹配阶段玩家 canAct=false，tickCapture 内部会跳过，
+        // 因此前哨站仅在对局开始后才可能被占领。
         for (const outpost of this.outposts) {
             outpost.tickCapture(players);
         }
