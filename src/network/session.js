@@ -15,7 +15,6 @@ const login = async (uuid, pass) => {
     let token = null;
 
     for (const cookieStr of setCookieHeaders) {
-        // 匹配 token=value; 或 token=value （不区分大小写）
         const match = cookieStr.match(/^token=([^;]*)/i);
         if (match) {
             token = match[1];
