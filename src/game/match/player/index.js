@@ -969,19 +969,35 @@ class Player {
      * 
      * 检查玩家与所有矿物的距离，在 30px 以内则设置 canMine 标志
      * 并记录最近的可开采目标。
+     * 已被其他玩家锁定开采的矿物会跳过，避免多人同时采同一矿物。
      * 
      * @param {import('../world.js').default} world - 世界实例
      */
     updateMiningProximity(world) {
+        // 记录上一目标，用于目标切换 / 停止开采时释放矿物锁定
+        const prevTarget = this.miningTarget;
+
         this.canMine = false;
         this.miningTarget = null;
 
         for (const mineral of world.minerals) {
+            if (mineral.collected) continue;
+            // 已被其他玩家锁定开采 → 不可用
+            if (mineral.miner && mineral.miner !== this.sessionId) continue;
             if (mineral.isPlayerNear(this.x, this.y)) {
                 this.canMine = true;
                 this.miningTarget = mineral;
                 break; // 取第一个在范围内的矿物
             }
+        }
+
+        // 目标切换（走远 / 矿物被采完 / 切到其他矿物）→ 释放旧目标锁定
+        if (prevTarget && prevTarget !== this.miningTarget) {
+            prevTarget.release(this.sessionId);
+        }
+        // 停止开采（E 松开 / 被打断）→ 释放旧目标锁定
+        if (prevTarget && !this.mining && prevTarget.miner === this.sessionId) {
+            prevTarget.release(this.sessionId);
         }
 
         // 如果失去目标（矿物被采完或玩家走远），打断开采
@@ -1059,6 +1075,7 @@ class Player {
      * 
      * 当玩家正在开采（E 按住 + 附近有矿物）时，
      * 每 tick 累加 miningTime，达到阈值后完成采集。
+     * 首次进入开采时锁定矿物，防止多人同时采同一矿物（先到先得）。
      * 匹配阶段禁止采矿。
      */
     processMining() {
@@ -1072,6 +1089,18 @@ class Player {
 
         // 安全检查：目标可能在两次 tick 间被其他玩家采集
         if (this.miningTarget.collected) {
+            this.mining = false;
+            this.miningTime = 0;
+            this.canMine = false;
+            this.miningTarget = null;
+            return;
+        }
+
+        // 开采锁定：第一次进入开采时声明归属（先到先得）
+        if (!this.miningTarget.miner) {
+            this.miningTarget.claim(this.sessionId);
+        } else if (this.miningTarget.miner !== this.sessionId) {
+            // 已被其他玩家锁定 → 立即停止开采，稍后由 updateMiningProximity 重新选目标
             this.mining = false;
             this.miningTime = 0;
             this.canMine = false;
@@ -1652,6 +1681,15 @@ class Player {
      *     由 MatchManager 据此判定“一方玩家死绝”与胜负
      */
     onDeath() {
+        // 死亡时释放矿物开采锁定，避免矿物被永久占用
+        if (this.miningTarget) {
+            this.miningTarget.release(this.sessionId);
+            this.miningTarget = null;
+        }
+        this.mining = false;
+        this.miningTime = 0;
+        this.canMine = false;
+
         // 无法复活：保持死亡状态，重置所有战斗状态
         if (!this.canRevive) {
             this.dead = true;

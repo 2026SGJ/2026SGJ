@@ -26,6 +26,11 @@ class Mineral extends Entity {
         /** @type {boolean} 是否已被采集（进入冷却） */
         this.collected = false;
 
+        /** @type {string|null} 当前锁定该矿物的玩家 sessionId（null = 无主）。
+         *  玩家开始开采时声明锁定，避免多人同时采同一矿物、
+         *  最后只有一人拿到的浪费。 */
+        this.miner = null;
+
         /** @type {number} 被采集时的时间戳（毫秒），用于重生计时 */
         this.collectedAt = 0;
 
@@ -67,12 +72,37 @@ class Mineral extends Entity {
     }
 
     /**
-     * 采集矿物：标记为已采集，记录时间戳，隐藏渲染
+     * 锁定矿物：声明该矿物由指定玩家开采。
+     * 仅当矿物当前无主时才会生效（先到先得）。
+     *
+     * @param {string} sessionId - 开采玩家的 sessionId
+     * @returns {boolean} 是否成功锁定
+     */
+    claim(sessionId) {
+        if (this.collected) return false;
+        if (this.miner) return this.miner === sessionId;
+        this.miner = sessionId;
+        return true;
+    }
+
+    /**
+     * 释放锁定：仅当锁定者与该玩家一致时释放，
+     * 防止误释放他人正在开采的矿物。
+     *
+     * @param {string} sessionId - 请求释放的玩家 sessionId
+     */
+    release(sessionId) {
+        if (this.miner === sessionId) this.miner = null;
+    }
+
+    /**
+     * 采集矿物：标记为已采集，记录时间戳，隐藏渲染，并清除开采锁定
      */
     collect() {
         this.collected = true;
         this.collectedAt = Date.now();
         this.data.isShowed = false;
+        this.miner = null;
     }
 
     /**
