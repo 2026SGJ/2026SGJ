@@ -591,14 +591,11 @@ class MatchManager {
      * @param {Object} data — 聊天数据（type 为消息类别，text 为展示文本）
      */
     _sendChat(data) {
-        for (const sessionId of Object.keys(this.game.players)) {
-            if (String(sessionId).startsWith(BOT_PREFIX)) continue;
-            room.send('S2CChat', JSON.stringify({
-                dest: sessionId,
-                seq: 0,
-                data,
-            }));
-        }
+        room.send('C2CChat', JSON.stringify({
+            dest: '',
+            seq: 0,
+            data,
+        }));
     }
 
     /** 广播匹配进度（每 5 秒一次） */
