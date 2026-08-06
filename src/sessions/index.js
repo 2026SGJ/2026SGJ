@@ -57,9 +57,10 @@ room.onMessage('syscmd:newPlayerAdded', (message) => {});
 room.onMessage('C2SHandshake', (message) => {
     const uuid = message.who.extra.uuid;
     const sessionId = message.who.sessionId;
+    const name = message.who && message.who.name ? message.who.name : '';
 
     activeSessions.add(sessionId);
-    if (!playerEvent.trigger('beforeNewPlayerAdded', { sessionId, uuid, event: message.msg })) {
+    if (!playerEvent.trigger('beforeNewPlayerAdded', { sessionId, uuid, name, event: message.msg })) {
         console.log(`beforeNewPlayerAdded handler returned false for sessionId=${sessionId}, uuid=${uuid}. Player not added.`);
         return;
     }
