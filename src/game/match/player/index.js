@@ -1377,16 +1377,20 @@ class Player {
 
     remoteData() {
         // 构建技能状态信息（供客户端 UI 展示）
+        // 注意：getSkillCooldownRemaining 内部使用 Date.now()，其返回值每毫秒变化，
+        // 会导致即使玩家原地静止、render 指纹也每 tick 不同，完全破坏增量压缩。
+        // 因此对剩余冷却时间做 50ms（≈1 tick）粒度 snap，确保同一 tick 内不变。
         const skillStates = {};
         for (let i = 1; i <= 4; i++) {
             const skillData = this.getSkillData(i);
             if (skillData) {
+                const rawRemaining = this.getSkillCooldownRemaining(i);
                 skillStates[i] = {
                     name: skillData.name,
                     cd: skillData.cd || 0,
                     cost: skillData.cost || 0,
-                    remaining: this.getSkillCooldownRemaining(i),
-                    ready: this.isSkillReady(i),
+                    remaining: rawRemaining > 0 ? Math.ceil(rawRemaining / 50) * 50 : 0,
+                    ready: rawRemaining <= 0,
                 };
             }
         }

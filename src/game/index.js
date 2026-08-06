@@ -440,12 +440,15 @@ class Game {
         }
 
         // ---- 3. 玩家（自己 + 其他）：首次全量，之后仅发送变化的 ----
+        // 注意：必须始终调用 remoteData() 获取最新数据，不能依赖 _lastRenderData 缓存。
+        // _lastRenderData 在 _refreshRenderFingerprints（主循环末尾）写入，
+        // 而 C2SUpdateRender 可能在主循环中途到达，此时 _lastRenderData 仍是上一 tick 的旧位置，
+        // 导致「服务端玩家已移动，但发给客户端的位置仍是旧坐标」的 bug。
         for (const [pid, p] of Object.entries(this.players)) {
             if (state.seenPlayers.has(pid)) {
                 // 用严格大于：上次发送时已包含该 tick 的变化，避免重复发送
                 if (p._lastChangeTick > lastSentTick) {
-                    // 复用指纹刷新时缓存的渲染数据，避免重复构建 remoteData
-                    packet.push(p._lastRenderData || p.remoteData());
+                    packet.push(p.remoteData());
                 }
             } else {
                 state.seenPlayers.add(pid);
