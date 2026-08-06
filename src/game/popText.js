@@ -66,6 +66,7 @@ const pushPopText = (options = {}) => {
 };
 
 /**
+ * 每 tick 由 Game 层调用：将队列中的漂浮文字广播给所有人类玩家与旁观者
  * 为单个玩家构建待投递的漂浮文字渲染条目（并入 S2CRender.data）
  *
  * 投递规则：
@@ -113,7 +114,10 @@ const prunePopTexts = (now = Date.now()) => {
         if (now - item.createdAt > item.duration + 1000) {
             popTextQueue.splice(i, 1);
         }
-    }
+    };
+
+    for (const sessionId of Object.keys(players)) send(sessionId);
+    for (const sessionId of Object.keys(spectators)) send(sessionId);
 };
 
 export { pushPopText, buildPopTextEntries, prunePopTexts };
