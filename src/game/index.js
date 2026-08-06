@@ -7,7 +7,26 @@ import room from '../network/index.js';
 import MatchManager from './match/manager.js';
 import { render } from './render.js';
 import Shop from './match/item/shop.js';
-import { flushPopText } from './popText.js';
+import ShopGui, { FAIL_REASON_TEXT } from './match/gui/shopGui.js';
+import { pushPopText, buildPopTextEntries, prunePopTexts } from './popText.js';
+
+/**
+ * 世界实体全量重同步周期（tick 数）
+ *
+ * 增量渲染协议下，世界实体仅在「首次全量推送」或「数据发生变化」时发送，
+ * 客户端约定缺失实体沿用上一帧。若客户端因网络抖动 / 中继丢包 / 加入竞态
+ * 错过了首次全量推送，静态实体（墙体/标题/装饰）与长期不变更的动态实体
+ * 将永远不会再被发送 —— 而玩家每帧都在变化会持续重发，最终表现就是
+ * 「客户端只能看到玩家，看不到任何世界实体」。
+ *
+ * 该常量控制周期全量重同步：每经过 FULL_RESYNC_TICKS 个渲染 tick，
+ * 强制清空每个客户端的 seenEntities（及 seenGui），令下一次渲染请求
+ * 全量重推所有世界实体，保证任意客户端都能在有限时间内恢复完整世界。
+ *
+ * 100 tick = 5 秒（20 tick/s），全量包约 10KB，均摊带宽 ~2KB/s/客户端，
+ * 换取「初始推送丢失后最多 5 秒自动恢复」的可靠性保障。
+ */
+const FULL_RESYNC_TICKS = 100;
 
 /**
  * Game类
@@ -39,14 +58,24 @@ class Game {
          */
         this.match = new MatchManager(this);
         /**
-         * 各玩家渲染增量同步状态：sessionId → { lastSentTick, seenEntities, seenIds, seenPlayers }
+         * 各玩家渲染增量同步状态：sessionId → { lastSentTick, seenEntities, seenIds, seenPlayers, ...GUI }
          * - lastSentTick  上次发送渲染包时的全局渲染 tick（world.renderTick）
+         * - lastFullSyncTick 上次「全量重同步」时的渲染 tick（周期全量重推，防初始推送丢失）
          * - seenEntities  已发送过的实体对象集合（按引用追踪：地图存在同 id 的不同实体，
          *                如装饰 base_A 与动态 Base base_A，必须各自独立追踪）
-         * - seenIds       已发送过的实体 id 集合（用于实体移除时判断是否发送隐藏包）
+         * - seenIds       已发送过的实体 id 集合（用于实体移除时判断是否发送 delete 包）
          * - seenPlayers   已发送过的玩家 sessionId 集合
+         * - seenGui       已发送过的 isFixed GUI 实体对象集合（每玩家独立）
+         * - seenGuiIds    已发送过的 GUI 实体 id 集合（删除包去重）
+         * - pendingGuiRemovals 待发送删除包的 GUI 实体 id 列表
+         * - lastPopTextSeq 已投递的最大漂浮文字 seq（并入 S2CRender 后按玩家去重）
          * 客户端约定「缺失的实体沿用上一帧」，故未变化的数据无需重复发送。
-         * @type {Object<string, {lastSentTick: number, seenEntities: Set<object>, seenIds: Set<string>, seenPlayers: Set<string>}>}
+         * @type {Object<string, {
+         *   lastSentTick: number, lastFullSyncTick: number, seenEntities: Set<object>,
+         *   seenIds: Set<string>, seenPlayers: Set<string>, seenGui: Set<object>,
+         *   seenGuiIds: Set<string>, pendingGuiRemovals: Array<{id:string}>,
+         *   lastPopTextSeq: number,
+         * }>}
          */
         this._renderStates = {};
         this.init();
@@ -57,7 +86,7 @@ class Game {
         console.log('游戏初始化');
         this.world = new World({ map_id: '1' });
         Shop.resetStock();   // 重置商店库存
-        // 主循环：每 tick 更新玩家和世界，随后同步物品栏
+        // 主循环：每 tick 更新玩家和世界，随后同步商店 GUI
         this.matchLoop = setInterval(() => {
             matchLoop(this.players, this.world);
             // 对局匹配 / 阶段 / 胜负判定管理（匹配广播、人机补位、基地伤害、死绝判负等）
@@ -65,12 +94,13 @@ class Game {
             // 广播本 tick 内产生的漂浮文字（伤害显示 S2CPopText，旁观者同样接收）
             flushPopText(this.players, this.spectators);
             // 同步所有玩家的物品栏（仅在变动时发送）
+            // 清理过期漂浮文字（并入 S2CRender 后由渲染请求按需投递）
+            prunePopTexts();
+            // 商店 GUI（isFixed 屏幕实体）开关 / 点击购买 / 手柄购买 —— 仅真人玩家
             for (const sessionId of Object.keys(this.players)) {
-                this._syncInventory(sessionId);
-                // 检测商店打开事件，发送 S2CShopOpen
-                this._syncShopOpen(sessionId);
+                this._syncShopGui(sessionId);
             }
-            // 渲染增量同步：本 tick 全部逻辑更新完成后，统一刷新实体/玩家渲染指纹
+            // 渲染增量同步：本 tick 全部逻辑更新完成后，统一刷新实体/玩家/GUI 渲染指纹
             this._refreshRenderFingerprints();
         }, 1000 / 20); // 每秒20 Ticks
 
@@ -144,9 +174,17 @@ class Game {
                 // 初始化渲染增量同步状态（首次渲染全量发送，之后增量）
                 this._renderStates[sessionId] = {
                     lastSentTick: 0,
+                    // 周期全量重同步游标（0 = 立即允许首次全量，见 _buildRenderPacket）
+                    lastFullSyncTick: 0,
                     seenEntities: new Set(),
                     seenIds: new Set(),
                     seenPlayers: new Set(),
+                    // ---- GUI（isFixed 屏幕实体）增量同步 ----
+                    seenGui: new Set(),            // 已发送过的 GUI 实体对象（按引用追踪）
+                    seenGuiIds: new Set(),         // 已发送过的 GUI 实体 id（删除包去重）
+                    pendingGuiRemovals: [],        // 待发送删除包的 GUI 实体 id 列表
+                    // ---- 漂浮文字（并入 S2CRender）投递游标 ----
+                    lastPopTextSeq: 0,             // 已投递的最大漂浮文字 seq
                 };
 
                 // 通知匹配管理器：真人加入（匹配阶段禁止行动、踢人机、调整倒计时）
@@ -171,12 +209,16 @@ class Game {
             const removed = this.players[sessionId];
             if (removed) {
                 const team = removed.team;
+                // 若离开时商店仍处于打开状态：释放商店占用记录（避免 SessionId 残留在 Set 中）
+                if (removed._openShop) {
+                    removed._openShop.openedBy.delete(sessionId);
+                }
                 delete this.players[sessionId];
                 delete this._renderStates[sessionId];
                 console.log(`Player removed: sessionId=${sessionId}, uuid=${uuid}`);
-                // 增量渲染下客户端沿用上一帧：移除玩家必须显式通知其他客户端隐藏，
-                // 避免残留幽灵（isShowed:false 隐藏包由渲染组装时消费，type 与常规条目一致）
-                this.world.markEntityRemoved({ id: sessionId, type: 'update' });
+                // 增量渲染下客户端沿用上一帧：移除玩家必须显式通知其他客户端不再跟踪，
+                // 避免残留幽灵与内存泄漏（delete 包由渲染组装时消费，通知客户端释放缓存）
+                this.world.markEntityRemoved({ id: sessionId });
                 // 通知匹配管理器：真人离开（匹配中重新补人机 / 对局中补位保持 4v4）
                 this.match.onHumanLeft(sessionId, team);
             }
@@ -211,6 +253,16 @@ class Game {
             } catch (_) {}
         });
 
+        // 鼠标事件（C2SMouseEvent）— 商店 GUI 点击购买 / 世界坐标点击瞄准
+        playerEvent.on('mouseEvent', ({ sessionId, uuid, event }) => {
+            const player = this.players[sessionId];
+            if (!player) return;
+            try {
+                const msg = typeof event === 'string' ? JSON.parse(event) : event;
+                player.trigger('mouseEvent', msg && msg.data !== undefined ? msg.data : msg);
+            } catch (_) {}
+        });
+
         // ============================================================
         //  道具购买（物品栏系统 — C2SBuyItem）
         // ============================================================
@@ -241,11 +293,6 @@ class Game {
                     dest: sessionId, seq: 0,
                     data: result
                 }));
-
-                // 购买成功后立即同步物品栏
-                if (result.success) {
-                    this._syncInventory(sessionId);
-                }
             } catch (err) {
                 console.error('[BuyItem] Error:', err);
                 room.send('S2CBuyItem', JSON.stringify({
@@ -287,11 +334,6 @@ class Game {
                     dest: sessionId, seq: 0,
                     data: { success, itemId }
                 }));
-
-                // 使用后立即同步物品栏
-                if (success) {
-                    this._syncInventory(sessionId);
-                }
             } catch (err) {
                 console.error('[UseItem] Error:', err);
                 room.send('S2CUseItem', JSON.stringify({
@@ -301,121 +343,12 @@ class Game {
             }
         });
 
-        // ---------- 商店列表查询（C2SShopList / S2CShopList） ----------
-        room.onMessage('C2SShopList', ({ who, msg }) => {
-            const sessionId = who.sessionId;
-            room.send('S2CShopList', JSON.stringify({
-                dest: sessionId, seq: 0,
-                data: { items: Shop.getShopList() }
-            }));
-        });
-
         // ============================================================
-        //  商店交互事件处理（实体商店系统 — C2SShopOpen/Close/Buy）
+        //  商店 GUI（isFixed 屏幕实体，见 _syncShopGui / _openShopGui）
+        //  商店打开由 Player 的 E 键切换触发（shopJustOpened），
+        //  商品购买通过鼠标 / 触屏点击或手柄右摇杆选中 + A 键完成，
+        //  界面与反馈全部经 S2CRender 渲染（不再使用 S2CShop* 专用包）。
         // ============================================================
-
-        // 商店打开请求 — 客户端 GUI 发起
-        playerEvent.on('shopOpen', ({ sessionId, event }) => {
-            const player = this.players[sessionId];
-            if (!player) return;
-
-            // 仅正常对局阶段允许打开商店（匹配阶段 / 7 分钟后加时赛禁止）
-            if (!this.match.canOpenShop()) {
-                this._sendShopError(sessionId, 'shop_disabled');
-                return;
-            }
-
-            // 使用 player tick 中预计算的最近商店
-            const shop = player._nearestShop || this.findNearestShop(player);
-            if (!shop) {
-                this._sendShopError(sessionId, 'no_shop_nearby');
-                return;
-            }
-
-            // 发送商品目录给客户端
-            const catalog = shop.getCatalog(player.team);
-            shop.openedBy.add(sessionId);
-            player._openShop = shop;
-
-            this._sendShopCatalog(sessionId, catalog);
-            console.log(`[Shop] Player ${sessionId} opened shop (team ${player.team})`);
-        });
-
-        // 商店关闭 — 客户端主动关闭
-        playerEvent.on('shopClose', ({ sessionId, event }) => {
-            const player = this.players[sessionId];
-            if (!player) return;
-
-            if (player._openShop) {
-                player._openShop.openedBy.delete(sessionId);
-                player._openShop = null;
-            }
-            player._shopOpen = false;
-            player._nearestShop = null;
-
-            this._sendShopClose(sessionId);
-            console.log(`[Shop] Player ${sessionId} closed shop`);
-        });
-
-        // 处理玩家手动触发的 shopAutoClose（离开范围自动关闭）
-        // 此事件由 Player.processShopOpen 内部触发
-        for (const [sessionId, player] of Object.entries(this.players)) {
-            player.on('shopAutoClose', ({ sessionId: sid }) => {
-                this._sendShopClose(sid);
-                console.log(`[Shop] Player ${sid} left shop range, auto-closed`);
-            });
-        }
-
-        // 商店购买
-        playerEvent.on('shopBuy', ({ sessionId, event }) => {
-            const player = this.players[sessionId];
-            if (!player) return;
-
-            // 仅正常对局阶段允许购买（匹配阶段 / 7 分钟后加时赛禁止）
-            if (!this.match.canOpenShop()) {
-                this._sendShopError(sessionId, 'shop_disabled');
-                return;
-            }
-
-            // 解析购买请求
-            let itemId;
-            try {
-                const parsed = JSON.parse(event);
-                itemId = parsed.data?.itemId || parsed.itemId;
-            } catch (_) {
-                itemId = event;
-            }
-            if (!itemId) {
-                this._sendShopError(sessionId, 'invalid_request');
-                return;
-            }
-
-            // 查找可交互的商店
-            const shop = player._openShop || this.findNearestShop(player);
-            if (!shop || !shop.isPlayerNear(player.x, player.y)) {
-                this._sendShopError(sessionId, 'no_shop_nearby');
-                return;
-            }
-
-            const result = shop.buy(player, itemId);
-            if (!result.ok) {
-                this._sendShopBuyResult(sessionId, { ok: false, reason: result.reason });
-                return;
-            }
-
-            // 购买成功 — 返回最新目录和购买结果
-            this._sendShopBuyResult(sessionId, {
-                ok: true,
-                itemId: itemId,
-                money: player.money,
-                catalog: shop.getCatalog(player.team),
-            });
-
-            console.log(
-                `[Shop] Player ${sessionId} bought ${itemId} ` +
-                `(team ${player.team}, money left: ${player.money})`
-            );
-        });
 
         // 渲染请求（dest 使用 sessionId）
         room.onMessage('C2SUpdateRender', ({ who, msg }) => {
@@ -449,11 +382,8 @@ class Game {
      * 任何影响渲染数据的状态变化都会被自动发现（无需在逻辑中手动打脏标记）。
      * 玩家静止 / 无冷却时指纹不变，可跳过发送，进一步降低带宽。
      *
-     * ── 进一步优化方向（需客户端配合，破坏性较小但尚未确认）────────
-     * 当前每个「变化中的玩家」仍发送完整 remoteData（约 1.5KB），其中
-     * skillStates 的 name/cd/cost 与 inventory 明细是静态数据（各占约 350B/400B），
-     * 随每帧重复发送。若客户端确认支持「字段级沿用上一帧」或拆分
-     * S2CInv 专属同步，可进一步将单玩家降到约 400B（全员移动场景再降约 80%）。
+     * 覆盖范围：世界实体（world.entities）+ 玩家 + 每玩家独立的
+     * isFixed GUI 实体（player._gui.entities，见 ShopGui）。
      * ──────────────────────────────────────────────────────────────
      */
     _refreshRenderFingerprints() {
@@ -472,6 +402,20 @@ class Game {
                 p._lastRenderData = data;
             }
         }
+
+        // 3) GUI 实体指纹（isFixed 屏幕实体，每玩家独立）
+        //    商店库存 / 金钱 / 选中态等变化自动进入增量发送
+        for (const p of Object.values(this.players)) {
+            const gui = p._gui;
+            if (!gui) continue;
+            for (const e of gui.entities) {
+                const fp = JSON.stringify(e.getRenderData());
+                if (fp !== e._renderFingerprint) {
+                    e._renderFingerprint = fp;
+                    e._lastChangeTick = this.world.renderTick;
+                }
+            }
+        }
     }
 
     /**
@@ -479,14 +423,17 @@ class Game {
      *
      * 客户端设计约定：渲染数据中缺失的实体沿用上一帧的渲染状态。
      * 因此这里只发送：
-     *   1. 首次出现的实体 / 玩家（全量推送一次，建立客户端缓存）
+     *   1. 首次出现的实体 / 玩家 / GUI（全量推送一次，建立客户端缓存）
      *   2. 自上次发送以来渲染数据发生变化（_lastChangeTick > lastSentTick，
-     *      严格大于：上次发送时已包含该 tick 的变化）的实体 / 玩家
-     *   3. 已从世界移除的实体（发送 isShowed:false 隐藏包，防止客户端残留幽灵）
+     *      严格大于：上次发送时已包含该 tick 的变化）的实体 / 玩家 / GUI
+     *   3. 已从世界移除的实体 / 已关闭的 GUI（发送 { type:'delete', id } 删除包，
+     *      通知客户端停止跟踪并释放缓存）
+     *   4. 漂浮文字（{ type:'popText' } 一次性渲染条目，按玩家去重投递）
      *
      * 静态实体（墙体 / 标题 / 装饰）永不变化：首次全量后不再发送，
      * 动态实体（矿物 / 前哨站 / 商店 / 基地 / 道具）仅在变化时发送，
-     * 玩家仅在移动 / 战斗 / 状态变化时发送。
+     * 玩家仅在移动 / 战斗 / 状态变化时发送，
+     * GUI（isFixed 屏幕实体）仅对所属玩家发送。
      *
      * @param {string} sessionId - 目标玩家 sessionId
      * @returns {Object[]} 增量渲染数据数组（可直接作为 S2CRender.data）
@@ -496,6 +443,23 @@ class Game {
         const state = this._renderStates[sessionId];
         // 渲染状态不存在（玩家刚被移除等竞态）→ 返回空包
         if (!state) return [];
+
+        // ---- 0. 周期全量重同步（防初始推送丢失） ----
+        // 世界实体仅在「首次全量」或「数据变化」时发送；若客户端因网络抖动 /
+        // 中继丢包 / 加入竞态错过了首次全量推送，静态实体（墙体/标题/装饰）与
+        // 长期不变更的动态实体将永远不会再被发送（玩家每帧变化仍会重发，表现
+        // 为“客户端只能看到玩家，看不到其他实体”）。
+        //
+        // 因此每 FULL_RESYNC_TICKS 个渲染 tick 强制清空 seenEntities / seenGui，
+        // 令本次渲染请求全量重推所有世界实体与 GUI 实体（幂等覆盖，客户端缓存
+        // 天然支持重复 update），保证任意客户端在有限时间内恢复完整世界。
+        // 注意：seenIds / seenPlayers 不清空 —— seenIds 用于已移除实体删除包去重，
+        // seenPlayers 避免全量重推玩家（玩家变化频繁本就持续重发）。
+        if (world.renderTick - state.lastFullSyncTick >= FULL_RESYNC_TICKS) {
+            state.seenEntities = new Set();
+            state.seenGui = new Set();
+            state.lastFullSyncTick = world.renderTick;
+        }
 
         const packet = [];
         const lastSentTick = state.lastSentTick;
@@ -518,30 +482,68 @@ class Game {
             }
         }
 
-        // ---- 2. 已移除实体 → 显式隐藏包（isShowed:false） ----
-        // 仅通知「已见过该 id」的玩家（从未见过的无需隐藏）；
+        // ---- 2. 已移除实体 → 显式删除包（{ type:'delete', id }） ----
+        // 仅通知「已见过该 id」的玩家（从未见过的无需通知）。
+        // 客户端收到 delete 后停止跟踪该实体并释放其缓存；isShowed:false 仅隐藏不释放，
+        // 会导致客户端持续追踪实体造成内存泄漏，故必须使用 delete 语义。
         // 每个玩家的 seen 集合相互独立，故此处可消费式删除：
-        // 该隐藏包对当前玩家只发一次，其他玩家仍会各自收到。
+        // 该删除包对当前玩家只发一次，其他玩家仍会各自收到。
         for (const gone of world._pendingRemovals) {
             if (state.seenIds.has(gone.id) || state.seenPlayers.has(gone.id)) {
-                packet.push({ id: gone.id, type: gone.type, isShowed: false });
+                packet.push({ type: 'delete', id: gone.id });
                 state.seenIds.delete(gone.id);
                 state.seenPlayers.delete(gone.id);
             }
         }
 
         // ---- 3. 玩家（自己 + 其他）：首次全量，之后仅发送变化的 ----
+        // 注意：必须始终调用 remoteData() 获取最新数据，不能依赖 _lastRenderData 缓存。
+        // _lastRenderData 在 _refreshRenderFingerprints（主循环末尾）写入，
+        // 而 C2SUpdateRender 可能在主循环中途到达，此时 _lastRenderData 仍是上一 tick 的旧位置，
+        // 导致「服务端玩家已移动，但发给客户端的位置仍是旧坐标」的 bug。
         for (const [pid, p] of Object.entries(this.players)) {
             if (state.seenPlayers.has(pid)) {
                 // 用严格大于：上次发送时已包含该 tick 的变化，避免重复发送
                 if (p._lastChangeTick > lastSentTick) {
-                    // 复用指纹刷新时缓存的渲染数据，避免重复构建 remoteData
-                    packet.push(p._lastRenderData || p.remoteData());
+                    packet.push(p.remoteData());
                 }
             } else {
                 state.seenPlayers.add(pid);
                 packet.push(p.remoteData());
             }
+        }
+
+        // ---- 4. GUI 实体删除包（先删后增：先通知客户端释放旧缓存，
+        //      再发送新实体，避免同 id 覆盖竞态） ----
+        for (const gone of state.pendingGuiRemovals) {
+            if (state.seenGuiIds.has(gone.id)) {
+                packet.push({ type: 'delete', id: gone.id });
+                state.seenGuiIds.delete(gone.id);
+            }
+        }
+        state.pendingGuiRemovals = [];
+
+        // ---- 5. GUI 实体（isFixed 屏幕 UI，每玩家独立）：首次全量，之后仅发送变化的 ----
+        const gui = this.players[sessionId]?._gui;
+        if (gui) {
+            for (const e of gui.entities) {
+                if (state.seenGui.has(e)) {
+                    if (e._lastChangeTick > lastSentTick) {
+                        packet.push(e.getRenderData());
+                    }
+                } else {
+                    state.seenGui.add(e);
+                    state.seenGuiIds.add(e.data.id);
+                    packet.push(e.getRenderData());
+                }
+            }
+        }
+
+        // ---- 6. 漂浮文字（并入 S2CRender 的一次性渲染条目，按玩家去重投递） ----
+        const { entries, lastSeq } = buildPopTextEntries(state.lastPopTextSeq);
+        if (entries.length > 0) {
+            state.lastPopTextSeq = lastSeq;
+            packet.push(...entries);
         }
 
         // 记录本次发送时的渲染 tick，供下次增量比较
@@ -550,70 +552,202 @@ class Game {
     }
 
     // ============================================================
-    //  商店 & 物品栏 工具方法（合并自两套商店系统）
+    //  商店 GUI（isFixed 屏幕实体）管理
+    //  ------------------------------------------------------------
+    //  商店界面与商品全部以 isFixed:true 实体渲染（见 ShopGui），
+    //  随 S2CRender 增量推送给所属玩家；购买通过鼠标 / 触屏点击或
+    //  手柄右摇杆选中 + A 键触发，购买结果以漂浮文字反馈。
+    //  不再使用 S2CShopOpen / S2CShopCatalog / S2CShopBuyResult 等专用包。
     // ============================================================
 
     /**
-     * 向客户端发送物品栏同步 (S2CInv)
-     * 仅在物品栏发生变化时调用（增量同步）
+     * 每 tick 同步商店 GUI 状态（由主循环对每个玩家调用）
+     *
+     * 职责：
+     *   1. 打开：玩家 E 键切换触发 shopJustOpened → 创建 ShopGui
+     *   2. 关闭：E 键再次切换 / 离开范围 / 死亡 → 销毁 ShopGui
+     *   3. 刷新：库存换货 / 金钱变化 / 选中态 每 tick 同步
+     *   4. 购买：消费玩家的点击（鼠标 / 触屏）与手柄 A 键购买意图
+     *
      * @param {string} sessionId
      */
-    _syncInventory(sessionId) {
-        // Bot 玩家跳过网络同步（无对应客户端连接）
-        if (BotPlayer.isBotSession(sessionId)) return;
-
-        const player = this.players[sessionId];
-        if (!player || !player.inventory) return;
-
-        const inv = player.inventory;
-        if (!inv.changed) return;
-
-        room.send('S2CInv', JSON.stringify({
-            dest: sessionId,
-            seq: 0,
-            data: {
-                items: inv.serialize(),
-                money: player.money,
-            }
-        }));
-        inv.markSynchronized();
-    }
-
-    /**
-     * 检测并发送 S2CShopOpen 消息
-     *
-     * 当玩家靠近商店按下 E 键时，shopJustOpened 标志被置位。
-     * 本方法检测该标志，发送 S2CShopOpen 给客户端以打开商店 UI，
-     * 然后清除标志避免重复发送。
-     *
-     * @param {string} sessionId - 玩家会话ID
-     */
-    _syncShopOpen(sessionId) {
-        // Bot 玩家跳过网络同步
+    _syncShopGui(sessionId) {
+        // Bot 玩家无客户端连接，跳过（人机通过 BotController 直接购物，无 GUI）
         if (BotPlayer.isBotSession(sessionId)) return;
 
         const player = this.players[sessionId];
         if (!player) return;
 
-        if (player.shopJustOpened && player.isShopOpen) {
-            // 发送 S2CShopOpen：包含商店道具列表和玩家当前金钱
-            room.send('S2CShopOpen', JSON.stringify({
-                dest: sessionId,
-                seq: 0,
-                data: {
-                    items: Shop.getShopList(),
-                    money: player.money,
-                }
-            }));
-            console.log(
-                `[Shop] S2CShopOpen → ${sessionId}, ` +
-                `位置 (${player.x.toFixed(0)}, ${player.y.toFixed(0)}), ` +
-                `金钱: ${player.money}`
-            );
-
-            // 清除一次性标志，防止每 tick 重复发送
-            player.shopJustOpened = false;
+        // ---- 1) 打开：E 键边沿触发 → 创建商店 GUI ----
+        if (player.shopJustOpened && player.isShopOpen && !player._gui) {
+            this._openShopGui(player);
         }
+
+        // ---- 2) 关闭：E 键切换 / 离开范围 / 死亡 → 销毁商店 GUI ----
+        if (player._gui && !player.isShopOpen) {
+            this._closeShopGui(player);
+            return; // 本次 tick 不再处理交互
+        }
+
+        const gui = player._gui;
+        if (!gui) return;
+
+        // ---- 3) 每 tick 刷新（库存刷新 / 金钱变化 / 选中态） ----
+        gui.refresh();
+
+        // ---- 4) 鼠标 / 触屏屏幕坐标点击 → 命中检测 + 购买 ----
+        if (player._pendingShopClick) {
+            const click = player._pendingShopClick;
+            player._pendingShopClick = null;
+            const result = gui.handleClick(click.x, click.y);
+            if (result === 'close') {
+                // 点击关闭按钮 → 关闭商店
+                player.isShopOpen = false;
+                player.shopJustOpened = false;
+            } else if (result) {
+                // 点击商品 → 购买
+                this._handleShopBuy(player, result.itemId);
+            }
+        }
+
+        // ---- 5) 手柄 A 键 → 购买当前选中商品 ----
+        if (player._pendingShopBuySelected) {
+            player._pendingShopBuySelected = false;
+            const itemId = gui.selectedItemId;
+            if (itemId) this._handleShopBuy(player, itemId);
+        }
+    }
+
+    /**
+     * 创建商店 GUI（打开商店）
+     *
+     * 校验阶段（仅正常对局）与商店距离，通过后构建 ShopGui 实体组，
+     * 实体将在玩家下一次渲染请求时全量发送（seenGui 为空集合）。
+     *
+     * @param {Player} player
+     */
+    _openShopGui(player) {
+        // 阶段校验：仅正常对局可打开/购买
+        if (!this.match.canOpenShop()) {
+            player.isShopOpen = false;
+            player.shopJustOpened = false;
+            this._buyFeedback(null, false, '当前阶段无法打开商店');
+            return;
+        }
+
+        // 商店目标：优先使用玩家 E 键绑定的商店，否则就近查找
+        const shop = player._openShop || this.findNearestShop(player);
+        if (!shop || !shop.isPlayerNear(player.x, player.y)) {
+            player.isShopOpen = false;
+            player.shopJustOpened = false;
+            player._openShop = null;
+            return;
+        }
+
+        // 同一玩家重复打开时清空残留的删除包（新旧实体 id 相同，直接更新缓存）
+        const state = this._renderStates[player.sessionId];
+        if (state) state.pendingGuiRemovals = [];
+
+        player._openShop = shop;
+        shop.openedBy.add(player.sessionId);
+        player._gui = new ShopGui(player, shop);
+        player._gui.build();
+        player.shopJustOpened = false;
+
+        console.log(`[ShopGui] ${player.sessionId} 打开商店（${shop.data.id}）`);
+    }
+
+    /**
+     * 销毁商店 GUI（关闭商店）
+     *
+     * 标记所有 GUI 实体为待删除，渲染组装时发送 { type:'delete', id }
+     * 通知客户端释放缓存；随后清空玩家引用与商店占用记录。
+     *
+     * @param {Player} player
+     */
+    _closeShopGui(player) {
+        const gui = player._gui;
+        if (!gui) return;
+
+        const state = this._renderStates[player.sessionId];
+        if (state) {
+            for (const e of gui.entities) {
+                state.pendingGuiRemovals.push({ id: e.data.id });
+            }
+        }
+        gui.destroy();
+
+        player._gui = null;
+        if (player._openShop) {
+            player._openShop.openedBy.delete(player.sessionId);
+            player._openShop = null;
+        }
+        player.isShopOpen = false;
+        player.shopJustOpened = false;
+        player._pendingShopClick = null;
+        player._pendingShopBuySelected = false;
+
+        console.log(`[ShopGui] ${player.sessionId} 关闭商店`);
+    }
+
+    /**
+     * 执行商店购买（鼠标 / 触屏点击商品、手柄 A 键购买选中商品）
+     *
+     * 购买逻辑（库存扣减 / 金钱扣除 / 效果施加）由 Shop 实体完成；
+     * 结果通过 S2CRender 漂浮文字反馈（成功 / 失败原因），
+     * 界面库存与金钱由 GUI 指纹刷新自动同步。
+     *
+     * @param {Player} player - 购买者
+     * @param {string} itemId - 商品 id
+     */
+    _handleShopBuy(player, itemId) {
+        const shop = player._openShop || this.findNearestShop(player);
+
+        // 阶段校验：7 分钟后加时赛禁止购买
+        if (!this.match.canOpenShop()) {
+            this._buyFeedback(null, false, FAIL_REASON_TEXT.shop_disabled);
+            return;
+        }
+        // 范围校验：被推离商店后禁止购买，并自动关闭界面
+        if (!shop || !shop.isPlayerNear(player.x, player.y)) {
+            this._buyFeedback(null, false, FAIL_REASON_TEXT.no_shop_nearby);
+            player.isShopOpen = false;
+            player.shopJustOpened = false;
+            return;
+        }
+
+        const result = shop.buy(player, itemId);
+        if (result.ok) {
+            // 购买成功：刷新 GUI（库存 / 金钱 / 可选态）并给出反馈
+            player._gui?.refresh();
+            this._buyFeedback(null, true);
+            console.log(
+                `[ShopGui] ${player.sessionId} 购买 ${itemId} ` +
+                `（剩余金钱 ${player.money}）`
+            );
+        } else {
+            this._buyFeedback(result.reason, false);
+        }
+    }
+
+    /**
+     * 购买结果漂浮文字反馈（并入 S2CRender，屏幕固定坐标）
+     *
+     * @param {string|null} reason - 失败原因 key（见 ShopGui.FAIL_REASON_TEXT）
+     * @param {boolean} ok         - 是否购买成功
+     * @param {string} [customText] - 自定义提示文本（优先于 reason 映射）
+     */
+    _buyFeedback(reason, ok = false, customText) {
+        const text =
+            customText ||
+            (ok ? '购买成功' : (FAIL_REASON_TEXT[reason] || '购买失败'));
+        pushPopText({
+            text,
+            x: 50, y: 34,          // 商店面板中部的反馈区（归一化坐标）
+            isFixed: true,          // 屏幕固定漂浮文字
+            color: ok ? 0x44ff44 : 0xff4444,
+            duration: 900,
+        });
     }
 
     /**
@@ -633,52 +767,6 @@ class Game {
             }
         }
         return nearest;
-    }
-
-    /**
-     * 发送商店目录给客户端
-     * @param {string} sessionId
-     * @param {Object} catalog
-     */
-    _sendShopCatalog(sessionId, catalog) {
-        room.send('S2CShopCatalog', JSON.stringify({
-            dest: sessionId,
-            seq: 0,
-            data: catalog,
-        }));
-    }
-
-    /**
-     * 告知客户端关闭商店界面
-     */
-    _sendShopClose(sessionId) {
-        room.send('S2CShopClose', JSON.stringify({
-            dest: sessionId,
-            seq: 0,
-            data: {},
-        }));
-    }
-
-    /**
-     * 发送购买结果给客户端
-     */
-    _sendShopBuyResult(sessionId, result) {
-        room.send('S2CShopBuyResult', JSON.stringify({
-            dest: sessionId,
-            seq: 0,
-            data: result,
-        }));
-    }
-
-    /**
-     * 发送商店错误消息
-     */
-    _sendShopError(sessionId, reason) {
-        room.send('S2CShopError', JSON.stringify({
-            dest: sessionId,
-            seq: 0,
-            data: { reason },
-        }));
     }
 
     end() {

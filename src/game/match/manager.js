@@ -288,6 +288,9 @@ class MatchManager {
         const target =
             bots.find(id => this.game.players[id].team === preferredTeam) || bots[0];
         delete this.game.players[target];
+        // 增量渲染下客户端沿用上一帧：被踢人机必须显式通知其他客户端不再跟踪，
+        // 否则客户端会持续保留该人机的缓存（幽灵 + 内存泄漏）
+        this.game.world.markEntityRemoved({ id: target });
         console.log(`[Match] 人机被踢出（为真人让位）: ${target}`);
         return true;
     }
@@ -588,22 +591,11 @@ class MatchManager {
      * @param {Object} data — 聊天数据（type 为消息类别，text 为展示文本）
      */
     _sendChat(data) {
-        for (const sessionId of Object.keys(this.game.players)) {
-            if (String(sessionId).startsWith(BOT_PREFIX)) continue;
-            room.send('S2CChat', JSON.stringify({
-                dest: sessionId,
-                seq: 0,
-                data,
-            }));
-        }
-        // 旁观者同样接收聊天信息（对局广播）
-        for (const sessionId of Object.keys(this.game.spectators || {})) {
-            room.send('S2CChat', JSON.stringify({
-                dest: sessionId,
-                seq: 0,
-                data,
-            }));
-        }
+        room.send('C2CChat', JSON.stringify({
+            dest: '',
+            seq: 0,
+            data,
+        }));
     }
 
     /** 广播匹配进度（每 5 秒一次） */

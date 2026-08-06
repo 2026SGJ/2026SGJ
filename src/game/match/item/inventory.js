@@ -8,8 +8,10 @@ import { ITEM_CONFIG, INVENTORY_LIMITS } from './itemConfig.js';
  * 存储结构：Map<itemId, { itemId, config, quantity }>
  * 
  * 设计原则：
- *   1. 仅在物品数量变动时通过 S2CInv 通知客户端
- *   2. 购买、使用、丢弃任何操作都会触发即时同步
+ *   1. 物品栏数据随玩家渲染数据同步（Player.remoteData().state.inventory），
+ *      由 S2CRender 增量推送，不再使用独立的 S2CInv 包
+ *   2. 购买、使用、丢弃任何操作都会使 serialize() 输出变化，
+ *      自动被渲染指纹检测捕获
  *   3. 超出容量或库存不足时拒绝操作
  */
 
@@ -21,7 +23,7 @@ class Inventory {
     static MAX_STACK = INVENTORY_LIMITS.MAX_STACK;
 
     /**
-     * @param {string} sessionId - 所属玩家 sessionId（用于网络同步）
+     * @param {string} sessionId - 所属玩家 sessionId
      */
     constructor(sessionId) {
         /** @type {string} */
@@ -31,12 +33,6 @@ class Inventory {
          * 物品存储：Map<itemId, { itemId, count }>
          */
         this.items = new Map();
-
-        /**
-         * 物品栏是否已改变（用于增量同步 - 仅在变动时发送）
-         * @type {boolean}
-         */
-        this.changed = false;
 
         /**
          * 回城卷轴 - 最近一次使用的时间戳（用于冷却控制）
@@ -129,7 +125,8 @@ class Inventory {
             this.items.set(itemId, { count: quantity });
         }
 
-        this.changed = true;
+        // 物品数量变化后无需手动打脏标记：serialize() 输出变化会被
+        // 渲染指纹（Player.remoteData）自动检测，随 S2CRender 增量同步
         console.log(
             `[Inventory] ${this.sessionId}: +${quantity}× ${config.name}, ` +
             `现在 ${this.count(itemId)} 个, ` +
@@ -156,7 +153,6 @@ class Inventory {
         if (existing.count <= 0) {
             this.items.delete(itemId);
         }
-        this.changed = true;
         return true;
     }
 
@@ -165,7 +161,6 @@ class Inventory {
      */
     clear() {
         this.items.clear();
-        this.changed = true;
     }
 
     /**
@@ -204,7 +199,7 @@ class Inventory {
     }
 
     /**
-     * 获取序列化数据（用于 S2CInv）
+     * 获取序列化数据（供 Player.remoteData 随 S2CRender 同步给客户端）
      * @returns {Object[]}
      */
     serialize() {
@@ -222,13 +217,6 @@ class Inventory {
             });
         }
         return list.sort((a, b) => b.itemId - a.itemId); // 按道具 ID 排序
-    }
-
-    /**
-     * 重置 changed 标志（在同步后调用）
-     */
-    markSynchronized() {
-        this.changed = false;
     }
 }
 

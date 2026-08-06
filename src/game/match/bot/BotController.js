@@ -30,6 +30,7 @@ import {
     Condition,
     Action,
 } from './bt/index.js';
+import { findPathInWorld } from '../../../utils/astar.js';
 
 // ==================== 行为标识（兼容旧 BotState 枚举） ====================
 
@@ -116,6 +117,18 @@ export default class BotController {
         /** @type {import('../entity/outpost.js').default | null} 当前前哨站目标 */
         this.outpostTarget = null;
 
+        // ---------- A* 寻路缓存 ----------
+        /** @type {Object | null} 寻路网格缓存 */
+        this._pathCache = null;
+        /** @type {{x:number,y:number}[] | null} 当前寻路路径 */
+        this._currentPath = null;
+        /** @type {{x:number,y:number} | null} 路径对应的目标点 */
+        this._pathGoal = null;
+        /** @type {number} 上次重新寻路的 tick */
+        this._lastPlanTick = 0;
+        /** @type {World|null} 上次寻路使用的 world 引用 */
+        this._lastWorld = null;
+
         // ---------- 行为树黑板：分支激活状态 ----------
         /** @type {boolean} 逃跑进行中（保持逃跑直到安全） */
         this.fleeActive = false;
@@ -200,6 +213,9 @@ export default class BotController {
 
         // ---- 收集感知数据（每 tick） ----
         this.perception = this._perceive(players, world, self);
+
+        // ---- 存储 world 引用供 A* 寻路使用 ----
+        this._lastWorld = world;
 
         // ---- 行为树决策 + 执行 ----
         this.tree.tick(this);
@@ -998,6 +1014,8 @@ export default class BotController {
         this._captureDecision = null;
         this.llmFleeRequested = false;
         this.llmCachedDecision = null;
+        this._currentPath = null;
+        this._pathGoal = null;
         self.mining = false;
         self.miningTime = 0;
         self.attacking = false;
@@ -1046,7 +1064,15 @@ export default class BotController {
             !!this._shopDecision || !!this._captureDecision;
     }
 
-    /** 向目标点移动 */
+    /**
+     * 向目标点移动（基于 A* 寻路，自动绕过障碍物）
+     *
+     * 实现策略：
+     *   - 每隔 PLAN_INTERVAL ticks（约 0.75s）重新规划一次 A* 路径
+     *   - 寻路生成一系列路点（waypoints），朝最近的路点移动
+     *   - 到达当前路点的小范围内，移除该路点，继续朝下一个前进
+     *   - 若 A* 找不到路径（被卡墙后等），回退为直线移动（直朝目标）
+     */
     _moveToward(self, target) {
         const tx = target.x - self.x;
         const ty = target.y - self.y;
@@ -1056,15 +1082,71 @@ export default class BotController {
         if (d <= ARRIVE_TOLERANCE) {
             self.dx = 0;
             self.dy = 0;
+            this._currentPath = null;
+            this._pathGoal = null;
             return;
         }
 
-        // 计算归一化方向 + 微小随机扰动
+        // ---- A* 寻路：重新规划条件 ----
+        // 目标大范围移动（>100px）或目标切换 → 立即重规划
+        // 否则每 15 ticks（约 750ms）周期性重规划，避免追逐动态目标时每 tick 全量搜索
+        const goalChanged = !this._pathGoal ||
+            Math.abs(this._pathGoal.x - target.x) > 100 ||
+            Math.abs(this._pathGoal.y - target.y) > 100;
+        const needReplan = goalChanged ||
+            this.tickCount - this._lastPlanTick > 15 ||
+            !this._currentPath;
+
+        if (needReplan && this._lastWorld) {
+            this._currentPath = findPathInWorld(
+                this._lastWorld,
+                self.x, self.y,
+                target.x, target.y,
+                this._pathCache
+            );
+            this._pathGoal = { x: target.x, y: target.y };
+            this._lastPlanTick = this.tickCount;
+
+            if (!this._currentPath && goalChanged) {
+                console.log(
+                    `[Bot] ${self.sessionId} ⚠ A* 无路径 ` +
+                    `(${Math.round(self.x)},${Math.round(self.y)})→` +
+                    `(${Math.round(target.x)},${Math.round(target.y)})，直走`
+                );
+            }
+        }
+
+        // ---- 按路径移动 ----
+        if (this._currentPath && this._currentPath.length > 0) {
+            // 到达当前路点（容差约半个格子）
+            const wp = this._currentPath[0];
+            const wpDist = Math.hypot(self.x - wp.x, self.y - wp.y);
+            if (wpDist <= 25) {
+                this._currentPath.shift();
+                if (this._currentPath.length === 0) {
+                    // 路径用完，朝向目标最后冲刺
+                    this._moveToPoint(self, target);
+                    return;
+                }
+            }
+            // 朝当前路点移动
+            this._moveToPoint(self, this._currentPath[0]);
+        } else {
+            // 无路径：直接移向目标
+            this._moveToPoint(self, target);
+        }
+    }
+
+    /**
+     * 朝一个坐标点简单移动（归一化方向 + 微小扰动）
+     */
+    _moveToPoint(self, point) {
+        const tx = point.x - self.x;
+        const ty = point.y - self.y;
+        const d = Math.hypot(tx, ty) || 1;
         const jitter = WANDER_JITTER * (Math.random() - 0.5);
         self.dx = tx / d + jitter;
         self.dy = ty / d + jitter * 0.5;
-
-        // 更新朝向
         self.dir = tx > 0 ? 90 : -90;
     }
 

@@ -4,6 +4,7 @@ import minerals from './enum/minerals/index.js';
 import maps from './enum/maps/index.js';
 import itemAssets from './enum/items/index.js';
 import entityAssets, { EntityNames } from './enum/entities/index.js';
+import guiAssets, { GuiNames } from './enum/gui/index.js';
 import { ItemNames, ItemStates, ItemTypes } from './enum/items/index.js';
 import {
     ITEM_CONFIG, ITEM_STOCK, ITEMS_BY_TYPE,
@@ -26,6 +27,11 @@ const assets = {
     entities: {
         assets: entityAssets,
         names: EntityNames,
+    },
+    /** 屏幕固定 GUI（商店面板 / 商品槽 / 光标等）的 asset 映射 */
+    gui: {
+        assets: guiAssets,
+        names: GuiNames,
     },
     data: {
         items: ITEM_CONFIG,

@@ -126,14 +126,14 @@ const buildPacket = (sid) => {
     }
     for (const gone of world._pendingRemovals) {
         if (state.seenIds.has(gone.id) || state.seenPlayers.has(gone.id)) {
-            packet.push({ id: gone.id, type: gone.type, isShowed: false });
+            packet.push({ type: 'delete', id: gone.id });
             state.seenIds.delete(gone.id);
             state.seenPlayers.delete(gone.id);
         }
     }
     for (const [pid, p] of Object.entries(players)) {
         if (state.seenPlayers.has(pid)) {
-            if (p._lastChangeTick > last) packet.push(p._lastRenderData || p.remoteData());
+            if (p._lastChangeTick > last) packet.push(p.remoteData());
         } else {
             state.seenPlayers.add(pid);
             packet.push(p.remoteData());

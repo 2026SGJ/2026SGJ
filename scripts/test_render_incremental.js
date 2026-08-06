@@ -6,8 +6,8 @@
  *   2. 无变化时后续渲染包为空（客户端沿用上一帧 → 零带宽）
  *   3. 实体变化（矿物采集）→ 仅该实体被发送
  *   4. 玩家移动 → 仅该玩家被发送；静止玩家不发送
- *   5. 道具实体创建 / 移除 → 创建时全量、移除时发送 isShowed:false 隐藏包
- *   6. 玩家移除 → 发送隐藏包
+ *   5. 道具实体创建 / 移除 → 创建时全量、移除时发送 { type:'delete', id } 删除包
+ *   6. 玩家移除 → 发送删除包
  *   7. 所有渲染条目 type 恒为 'update'（协议兼容）
  */
 import World from '../src/game/match/world.js';
@@ -79,14 +79,14 @@ const buildPacket = (sid) => {
     }
     for (const gone of world._pendingRemovals) {
         if (state.seenIds.has(gone.id) || state.seenPlayers.has(gone.id)) {
-            packet.push({ id: gone.id, type: gone.type, isShowed: false });
+            packet.push({ type: 'delete', id: gone.id });
             state.seenIds.delete(gone.id);
             state.seenPlayers.delete(gone.id);
         }
     }
     for (const [pid, p] of Object.entries(players)) {
         if (state.seenPlayers.has(pid)) {
-            if (p._lastChangeTick > last) packet.push(p._lastRenderData || p.remoteData());
+            if (p._lastChangeTick > last) packet.push(p.remoteData());
         } else {
             state.seenPlayers.add(pid);
             packet.push(p.remoteData());
@@ -156,23 +156,23 @@ const bombCreate = buildPacket('p1');
 assert(bombCreate.length === 1 && bombCreate[0].id === bomb.data.id, `新炸弹创建即发送: ${bombCreate[0]?.id}`);
 assert(bombCreate[0].type === 'update', '炸弹渲染条目 type=update');
 
-// 炸弹移除 → 隐藏包
+// 炸弹移除 → 删除包（客户端停止跟踪并释放缓存）
 world.removeItemEntity(bomb);
 const bombRemove = buildPacket('p1');
-assert(bombRemove.length === 1, `炸弹移除发送隐藏包: ${bombRemove.length} 条`);
-assert(bombRemove[0].isShowed === false && bombRemove[0].id === bomb.data.id, '隐藏包 {id, isShowed:false}');
+assert(bombRemove.length === 1, `炸弹移除发送删除包: ${bombRemove.length} 条`);
+assert(bombRemove[0].type === 'delete' && bombRemove[0].id === bomb.data.id, '删除包 {type:"delete", id}');
 
-// 隐藏包不重复发送（pendingRemovals 过期清理）
+// 删除包不重复发送（pendingRemovals 过期清理）
 refreshFingerprints();
 const later = buildPacket('p1');
-assert(later.length === 0, '隐藏包不重复发送（记录过期清理）');
+assert(later.length === 0, '删除包不重复发送（记录过期清理）');
 
-// ---- 场景 E：玩家移除 → 隐藏包 ----
+// ---- 场景 E：玩家移除 → 删除包 ----
 console.log('\n[场景 E] 玩家移除');
 delete players.p2; // 模拟真实移除（与 Game.playerRemoved 一致：先删 players 再记录）
-world.markEntityRemoved({ id: 'p2', type: 'update' });
+world.markEntityRemoved({ id: 'p2' });
 const playerGone = buildPacket('p1');
-assert(playerGone.length === 1 && playerGone[0].id === 'p2' && playerGone[0].isShowed === false, '玩家移除发送 isShowed:false 隐藏包');
+assert(playerGone.length === 1 && playerGone[0].type === 'delete' && playerGone[0].id === 'p2', '玩家移除发送 {type:"delete", id} 删除包');
 
 // ---- 场景 F：多客户端独立 seen 状态 ----
 console.log('\n[场景 F] 多客户端独立状态');
