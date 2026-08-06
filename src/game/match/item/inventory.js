@@ -111,7 +111,7 @@ class Inventory {
 
         if (existing) {
             // 已有此道具：检查堆叠上限
-            if (existing.count + quantity > Inventory_MAX_STACK) {
+            if (existing.count + quantity > Inventory.MAX_STACK) {
                 console.log(`[Inventory] ${this.sessionId}: 道具 ${config.name} 超出堆叠上限（目前 ${existing.count} / ${Inventory.MAX_STACK}）`);
                 return false;
             }
@@ -216,7 +216,9 @@ class Inventory {
                 cdRemaining: this.getItemCdRemaining(item.itemId),
             });
         }
-        return list.sort((a, b) => b.itemId - a.itemId); // 按道具 ID 排序
+        // 按道具 ID 排序（itemId 为字符串，使用 localeCompare，
+        // 此前使用减法运算结果为 NaN，排序失效）
+        return list.sort((a, b) => a.itemId.localeCompare(b.itemId));
     }
 }
 

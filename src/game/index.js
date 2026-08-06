@@ -92,9 +92,13 @@ class Game {
             matchLoop(this.players, this.world);
             // 对局匹配 / 阶段 / 胜负判定管理（匹配广播、人机补位、基地伤害、死绝判负等）
             this.match.tick();
+            // 同步所有玩家的物品栏（仅在变动时发送）
             // 广播本 tick 内产生的公屏聊天消息（玩家加入/退出/死亡播报）
             flushChat();
             // 清理过期漂浮文字（并入 S2CRender 后由渲染请求按需投递）
+            // 注意：漂浮文字已并入 S2CRender 渲染管线（见 _buildRenderPacket 的
+            // buildPopTextEntries），不再走独立的 S2CPopText 广播，主循环无需再调用
+            // 旧版 flushPopText（该函数已在渲染重构时从 popText.js 移除）。
             prunePopTexts();
             // 商店 GUI（isFixed 屏幕实体）开关 / 点击购买 / 手柄购买 —— 仅真人玩家
             for (const sessionId of Object.keys(this.players)) {
@@ -115,11 +119,23 @@ class Game {
                         joinedAt: Date.now(),
                     };
                     // 初始化渲染增量同步状态（首次渲染全量发送，之后增量）
+                    // 注意：字段必须与普通玩家保持一致（周期全量重同步游标 / GUI 删除包 /
+                    // 漂浮文字投递游标），否则 _buildRenderPacket 会因缺失字段而崩溃
+                    // （如 state.pendingGuiRemovals 为 undefined → TypeError）或行为异常
+                    // （如 lastPopTextSeq 为 undefined → 漂浮文字被重复投递）。
                     this._renderStates[sessionId] = {
                         lastSentTick: 0,
+                        // 周期全量重同步游标（0 = 立即允许首次全量，见 _buildRenderPacket）
+                        lastFullSyncTick: 0,
                         seenEntities: new Set(),
                         seenIds: new Set(),
                         seenPlayers: new Set(),
+                        // ---- GUI（isFixed 屏幕实体）增量同步 ----
+                        seenGui: new Set(),
+                        seenGuiIds: new Set(),
+                        pendingGuiRemovals: [],
+                        // ---- 漂浮文字（并入 S2CRender）投递游标 ----
+                        lastPopTextSeq: 0,
                     };
                     console.log(
                         `[Match] 游戏已开始（阶段=${this.match.phase}），` +

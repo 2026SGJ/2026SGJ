@@ -63,8 +63,11 @@ class Shop {
         }
 
         // ----- 5. 执行购买 -----
+        // 先入物品栏，成功后再扣钱（若物品栏添加失败，不扣玩家金钱）
+        if (!inventory.add(itemId, 1)) {
+            return { success: false, reason: '物品栏添加失败' };
+        }
         player.money -= config.price;
-        inventory.add(itemId, 1);
 
         // 减少库存
         if (config.stock > 0) {

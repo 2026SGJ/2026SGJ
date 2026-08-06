@@ -218,7 +218,9 @@ class ShopGui {
             const entity = this._itemEntities[i];
             if (!entity) return;
             // 刷新换货后商品可能改变：同步图标 asset 与状态
+            // （itemId 也必须同步，否则换货后点击购买仍会使用旧商品 id）
             entity.data.asset = item.id;
+            entity.state.itemId = item.id;
             entity.state.price = item.price;
             entity.state.stock = item.permanent ? -1 : item.stock;
             entity.state.permanent = !!item.permanent;

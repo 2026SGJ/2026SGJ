@@ -1808,6 +1808,9 @@ class Player {
         }
 
         let success = false;
+        // 从 options 中解构世界/玩家引用（此前直接引用未声明的 world/players 变量，
+        // 任何实际使用道具都会抛出 ReferenceError: world is not defined）
+        const { world, players } = options;
         // 若未传入 world/players，使用 tick 中存储的引用
         const effectiveWorld = world || this._worldRef;
         const effectivePlayers = players || this._playersRef;
