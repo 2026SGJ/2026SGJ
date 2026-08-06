@@ -227,5 +227,25 @@ const incrCPerClient = incrC / 20 / Object.keys(players).length;
 console.log(`  旧管线: ${perClientKbps(legacyCPerClient)} KB/s/客户端`);
 console.log(`  增量:   ${perClientKbps(incrCPerClient)} KB/s/客户端  ↓ ${((1 - incrC / legacyC) * 100).toFixed(1)}%`);
 
+// ============================================================
+//  场景 D：pps 对比（批处理前后，S2CRenderBatch 合并广播）
+// ============================================================
+// room.send 是广播：每个包都会投递给房间内所有客户端。
+// 旧管线每请求一包广播 → 每客户端收到的 pps = 客户端数 × 请求频率；
+// 新管线每 tick 合并为单个 S2CRenderBatch → 每客户端收到的 pps = tick 频率
+// （且全静止时无待发数据，直接跳过发送 → 0 包）。
+console.log('\n[场景 D] pps 对比（批处理前后）');
+const clientCount = Object.keys(players).length; // 8 名客户端
+const reqRate = 20;                              // 每客户端请求频率 20Hz（= tick 频率）
+const oldPps = clientCount * reqRate;            // 旧：每客户端实际收到的广播包/s
+const newPps = reqRate;                          // 新：每 tick 至多 1 个合并包/s
+console.log(`  旧管线（每请求一包广播）: 广播包/s = 客户端数 × 请求频率 = ${clientCount} × ${reqRate} = ${oldPps}`);
+console.log(`  每个客户端实际收到: ${oldPps} 包/s（广播扇出，全部投递给每个客户端）`);
+console.log(`  新管线（S2CRenderBatch）: 广播包/s = 主循环 tick 频率 = ${newPps}`);
+console.log(`  每个客户端实际收到: ${newPps} 包/s（每 tick 至多 1 个合并包，全静止时 0 包）`);
+console.log(`  ↓ 渲染 pps 降幅: ${((1 - newPps / oldPps) * 100).toFixed(1)}%（${clientCount} 客户端时）`);
+
 console.log('\n[结论] 优化后带宽取决于「实际变化量」，静止/挂机玩家与静态场景几乎零占用；');
-console.log('       首帧全量建立缓存（一次性 ~10.8KB），之后仅增量同步。');
+console.log('       首帧全量建立缓存（一次性 ~10.8KB），之后仅增量同步；');
+console.log('       pps 由批处理（S2CRenderBatch）从「客户端数 × 请求频率」降至「tick 频率」，');
+console.log('       从根本上消除广播扇出放大，避免高 pps 拥塞丢包损坏增量渲染。');

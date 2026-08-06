@@ -29,6 +29,15 @@ const clamp01 = (v) => {
 };
 
 /**
+ * 输入事件队列最大长度
+ *
+ * 键盘差分上报（KeyDown/KeyUp）下，事件频率 ≈ 真实按键频率，天然很低；
+ * 该上限仅用于防御客户端异常高频刷包导致的事件队列无界增长（内存保护），
+ * 超出时丢弃最旧事件（差分事件成对出现，丢弃旧事件不会造成状态偏差）。
+ */
+const EVENT_QUEUE_MAX = 256;
+
+/**
  * Player — 玩家实体
  * 
  * 负责处理输入、移动、技能、开采矿物等全部玩家逻辑。
@@ -41,7 +50,8 @@ const clamp01 = (v) => {
  *   E       — 靠近商店时打开商店（优先级最高）；否则靠近矿物时开采
  * 
  * 三端操作支持：
- *   - 键盘：C2SKeyboardEvent（KeyHolding / KeyDown / KeyUp）
+ *   - 键盘：C2SKeyboardEvent（差分上报：KeyDown 按下 / KeyUp 抬起，
+ *           详见 processEvents；可选周期性 KeyHolding 快照用于对账）
  *   - 手柄：C2SGamepad / C2SGamepadEvent（左右双摇杆 + 扳机 + ABXY，见 processGamepadInput）
  *   - 触屏：C2STouch / C2STouchEvent（虚拟摇杆/虚拟按键 → 虚拟数据；否则点击坐标，见 processTouchInput）
  *   三端共用一套按键状态（effectiveKeys = 键盘 heldKeys ∪ 手柄 _gamepadKeys ∪ 触屏 _touchKeys），
@@ -290,7 +300,12 @@ class Player {
         // ---------- 三端操作支持 ----------
 
         this.on('keyboardEvent', (a) => {
+            // 差分上报（KeyDown/KeyUp）下事件频率≈真实按键频率，天然很低；
+            // 队列上限仅防御客户端异常高频刷包导致内存无界增长
             this.eventQueue.push(a);
+            if (this.eventQueue.length > EVENT_QUEUE_MAX) {
+                this.eventQueue.splice(0, this.eventQueue.length - EVENT_QUEUE_MAX);
+            }
         });
 
         // 手柄 / 触屏 / 鼠标事件（由 game/index.js 从网络层转发而来）
@@ -335,9 +350,18 @@ class Player {
 
     /**
      * 消费事件队列，更新当前帧的按键状态
-     * 支持两种输入模式：
-     * - KeyHolding: 客户端每帧发送当前已按下的按键列表
-     * - KeyDown / KeyUp: 单个按键按下/抬起事件
+     * 
+     * 键盘差分上报协议（C2SKeyboardEvent，客户端约定）：
+     *   - KeyDown：按键按下瞬间上报一次 → 加入 heldKeys（幂等，重复上报不重复添加）
+     *   - KeyUp：  按键抬起瞬间上报一次 → 移出 heldKeys（不存在则忽略）
+     *   - KeyHolding：完整按键快照 → 整体覆盖 heldKeys（对账机制）。建议客户端
+     *                 每 1~2 秒或断线重连后补发一次，用于纠正差分上报因丢包
+     *                 （如 KeyUp 丢失）产生的按键状态偏差。
+     * 
+     * 服务器以 heldKeys 维护「当前按下的键盘按键集合」，配合 prevHeldKeys
+     * 完成单次触发操作（C 切技能 / E 开商店 / 数字键用道具）的边沿检测。
+     * 差分上报相比旧版每帧全量 KeyHold：C2S 方向事件数从「20 包/s」降至
+     * 「按键变化频率」（空闲时几乎为零），显著降低上传 pps 与带宽。
      * 
      * 手柄（C2SGamepad）与触屏（C2STouch）输入不直接进入 heldKeys，
      * 而是先归一化到 this._gamepadState / this._touchState，

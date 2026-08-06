@@ -2,6 +2,21 @@
 
 本文档记录本次代码审阅与修复的变更内容，以及审阅中发现但暂未修改的问题（拿不准、交由后续确认）。
 
+## 渲染管线重构（降 pps：S2CRender → S2CRenderBatch 批处理）
+
+### 1. 渲染包合并广播 — `src/game/render.js` / `src/game/index.js`
+- **问题**：旧管线中，客户端每次 `C2SUpdateRender` 都触发一次独立的 `S2CRender` 广播；而 `room.send` 是广播（投递给房间内所有客户端）。8 名玩家各按 20Hz 请求时，服务器每秒广播 160 个渲染包，每个客户端实际收到全部 160 包/s —— pps 过高导致中继拥塞丢包，增量渲染协议丢一个包就会使客户端缓存缺失实体（沿用上一帧）造成渲染损坏。
+- **修复**：新增 `RenderBatcher`（`src/game/render.js`）：所有客户端的增量渲染包先按 sessionId 暂存，由 Game 主循环每 tick 调用 `_flushRenderBatch()` 合并为**单个** `S2CRenderBatch` 广播包（`{ seq, data: { [sessionId]: [条目...] } }`），每个客户端只取 `data[ownSessionId]` 渲染。
+  - pps：`客户端数 × 请求频率`（8 人 20Hz ≈ 160 包/s）→ `主循环 tick 频率`（20 包/s）；全静止阶段无待发数据直接跳过发送 → 0 包/s。
+  - 请求与发送解耦：`C2SUpdateRender` 仅登记 dirty 集合，增量包在 `_refreshRenderFingerprints` 之后统一构建（顺带消除了「请求恰在主循环中途到达时读到上一 tick 旧坐标」的时序问题）。
+- **客户端配合**：渲染消息名由 `S2CRender`（`{dest, seq, data: []}`）改为 `S2CRenderBatch`（`{seq, data: {sessionId: []}}`），收到后取 `data[ownSessionId]` 渲染即可，语义与旧 dest 过滤完全等价。
+
+### 2. 键盘事件差分上报 — `src/game/match/player/index.js` / `src/sessions/index.js`
+- **修复**：服务端已支持 `KeyDown`/`KeyUp` 增量事件流，现补充完整协议文档与防御：
+  - `processEvents` 文档明确差分上报协议（KeyDown 按下 / KeyUp 抬起），并建议客户端每 1~2 秒或重连后补发一次 `KeyHolding` 完整快照用于对账（纠正 KeyUp 丢包造成的按键偏差）；
+  - 事件队列增加上限（`EVENT_QUEUE_MAX = 256`），防御客户端异常高频刷包导致内存无界增长；
+  - C2S 方向 pps 从「20 包/s（每帧全量 KeyHold）」降至「按键变化频率」（空闲几乎为零）。
+
 ## 修复的 Bug
 
 ### 1. 主循环首个 tick 崩溃（进程直接退出）— `src/game/index.js`

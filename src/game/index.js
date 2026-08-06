@@ -5,7 +5,7 @@ import BotPlayer from './match/bot/BotPlayer.js';
 import World from './match/world.js';
 import room from '../network/index.js';
 import MatchManager from './match/manager.js';
-import { render } from './render.js';
+import RenderBatcher from './render.js';
 import Shop from './match/item/shop.js';
 import ShopGui, { FAIL_REASON_TEXT } from './match/gui/shopGui.js';
 import { pushPopText, buildPopTextEntries, prunePopTexts } from './popText.js';
@@ -79,6 +79,20 @@ class Game {
          * }>}
          */
         this._renderStates = {};
+        // ---------- 渲染批处理（S2CRenderBatch 合并广播，降 pps） ----------
+        /**
+         * 渲染包合并器：把所有客户端的增量渲染包合并为「单个」S2CRenderBatch 广播，
+         * 杜绝「每请求一次广播一次」的扇出放大（详见 render.js 头注释）。
+         * @type {RenderBatcher}
+         */
+        this._renderBatcher = new RenderBatcher(room);
+        /**
+         * 本 tick 内请求过渲染（C2SUpdateRender）的客户端 sessionId 集合。
+         * 请求只登记、不发送；增量包的构建与发送统一推迟到主循环末尾
+         * _flushRenderBatch（指纹刷新之后），见该方法注释。
+         * @type {Set<string>}
+         */
+        this._renderDirty = new Set();
         this.init();
     }
 
@@ -106,6 +120,10 @@ class Game {
             }
             // 渲染增量同步：本 tick 全部逻辑更新完成后，统一刷新实体/玩家/GUI 渲染指纹
             this._refreshRenderFingerprints();
+            // 渲染批处理：将本 tick 内所有请求渲染的客户端增量包合并为单个
+            // S2CRenderBatch 广播（见 _flushRenderBatch）—— 这是把 pps 从
+            // 「客户端数 × 请求频率」降到「主循环 tick 频率」的关键一步。
+            this._flushRenderBatch();
         }, 1000 / 20); // 每秒20 Ticks
 
         playerEvent.on('beforeNewPlayerAdded', ({ sessionId, uuid, name, event }) => {
@@ -396,14 +414,17 @@ class Game {
             const isPlayer = !!this.players[sessionId];
             const isSpectator = !!this.spectators[sessionId];
             if (!isPlayer && !isSpectator) return;
-            // 组装增量渲染包：仅发送自上次请求以来变化 / 新增的实体与玩家，
-            // 未变化的由客户端沿用上一帧（详见 _buildRenderPacket）
-            render(sessionId, this._buildRenderPacket(sessionId));
+            // 仅登记「本 tick 需要渲染」：增量包的构建与发送统一推迟到主循环
+            // 末尾 _flushRenderBatch（在 _refreshRenderFingerprints 之后），好处：
+            //   1. 所有客户端的增量包合并为单个 S2CRenderBatch 广播，杜绝
+            //      「每请求一次广播一次」的扇出放大（pps 骤降，见 render.js）；
+            //   2. 构建时指纹已刷新完毕，不会读到上一 tick 的旧数据（见 _buildRenderPacket）
+            this._renderDirty.add(sessionId);
         });
     }
 
     // ============================================================
-    //  渲染增量同步（S2CRender 带宽优化）
+    //  渲染增量同步（S2CRender 带宽优化 + S2CRenderBatch 批处理）
     // ============================================================
 
     /**
@@ -456,7 +477,37 @@ class Game {
     }
 
     /**
-     * 组装单个玩家的增量渲染包（S2CRender 的 data 数组）
+     * 每 tick 渲染批处理：合并并广播所有待渲染客户端的增量包
+     *
+     * 必须在 _refreshRenderFingerprints（本 tick 指纹刷新）之后调用：
+     *   1. 指纹刷新后 world.renderTick 已递增，实体/玩家的 _lastChangeTick
+     *      已是最新 —— 此刻构建增量包不会读到上一 tick 的旧数据；
+     *   2. 把本 tick 内所有请求过渲染（C2SUpdateRender 登记）的客户端增量包
+     *      合并为「单个」S2CRenderBatch 广播，将 pps 从
+     *      「客户端数 × 请求频率」骤降为「主循环 tick 频率」。
+     *
+     * 请求与发送解耦后，客户端请求频率（可能远高于 20Hz）不再放大广播次数；
+     * 空闲阶段（全静止、无删除、无漂浮文字）增量包为空，flush 直接跳过发送，
+     * 该 tick 渲染 pps 降为 0。
+     */
+    _flushRenderBatch() {
+        // 本 tick 无人请求渲染 → 无需构建与发送（保持零 pps）
+        if (this._renderDirty.size === 0) return;
+
+        // 为每个待渲染客户端构建增量包并入合并器
+        // （玩家可能在本 tick 内离开：已不在 players/spectators 中则跳过）
+        for (const sid of this._renderDirty) {
+            if (!this.players[sid] && !this.spectators[sid]) continue;
+            this._renderBatcher.queue(sid, this._buildRenderPacket(sid));
+        }
+        this._renderDirty.clear();
+
+        // 全部为空包时 flush 内部会跳过发送（保持零 pps）
+        this._renderBatcher.flush();
+    }
+
+    /**
+     * 组装单个玩家的增量渲染包（S2CRenderBatch.data[sessionId] 数组）
      *
      * 客户端设计约定：渲染数据中缺失的实体沿用上一帧的渲染状态。
      * 因此这里只发送：
@@ -473,7 +524,7 @@ class Game {
      * GUI（isFixed 屏幕实体）仅对所属玩家发送。
      *
      * @param {string} sessionId - 目标玩家 sessionId
-     * @returns {Object[]} 增量渲染数据数组（可直接作为 S2CRender.data）
+     * @returns {Object[]} 增量渲染数据数组（可直接作为 S2CRenderBatch.data[sessionId]）
      */
     _buildRenderPacket(sessionId) {
         const world = this.world;
@@ -535,9 +586,9 @@ class Game {
 
         // ---- 3. 玩家（自己 + 其他）：首次全量，之后仅发送变化的 ----
         // 注意：必须始终调用 remoteData() 获取最新数据，不能依赖 _lastRenderData 缓存。
-        // _lastRenderData 在 _refreshRenderFingerprints（主循环末尾）写入，
-        // 而 C2SUpdateRender 可能在主循环中途到达，此时 _lastRenderData 仍是上一 tick 的旧位置，
-        // 导致「服务端玩家已移动，但发给客户端的位置仍是旧坐标」的 bug。
+        // _lastRenderData 在 _refreshRenderFingerprints（主循环末尾）写入；本方法现已在
+        // _refreshRenderFingerprints 之后调用（见 _flushRenderBatch），故此刻缓存必然是最新，
+        // 但仍保持每次调用 remoteData() 的写法，以兼容未来可能出现的请求时序变化。
         for (const [pid, p] of Object.entries(this.players)) {
             if (state.seenPlayers.has(pid)) {
                 // 用严格大于：上次发送时已包含该 tick 的变化，避免重复发送

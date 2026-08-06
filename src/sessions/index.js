@@ -75,7 +75,13 @@ room.onMessage('C2SHandshake', (message) => {
 });
 
 // ============================================================
-//  C2SKeyboardEvent — 键盘事件
+//  C2SKeyboardEvent — 键盘事件（差分上报）
+//  客户端约定：仅在按键按下 / 抬起瞬间上报，不再每帧全量上报 KeyHold：
+//    { type: 'KeyDown', key: 'KeyW' }  // 按下瞬间上报一次
+//    { type: 'KeyUp',   key: 'KeyW' }  // 抬起瞬间上报一次
+//    { type: 'KeyHolding', key: ['KeyW', ...] }  // 可选：周期性快照对账
+//  服务器按事件流增量维护 heldKeys（见 Player.processEvents），
+//  C2S 方向 pps 从「20 包/s（每帧全量）」降至「按键变化频率」。
 // ============================================================
 room.onMessage('C2SKeyboardEvent', (message) => {
     const sessionId = message.who.sessionId;
