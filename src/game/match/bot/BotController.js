@@ -77,6 +77,8 @@ const CAPTURE_INTERACT_RANGE = 105;
 const CAPTURE_PLAN_RANGE = 250;
 /** 采矿交互距离（像素） */
 const MINING_RANGE = 35;
+/** 主动出击的钱包货币上限（money ≤ 此值 → 满血时主动出击而不是采矿） */
+const AGGRESSIVE_MONEY_MAX = 30;
 /** 设置重生点的距离（像素） */
 const SPAWN_SET_RANGE = 25;
 /** 目标被打断后离所有目标过远 → 放弃该计划（像素） */
@@ -351,12 +353,17 @@ export default class BotController {
     /**
      * 想战斗：
      *   - 已锁定战斗目标 → 继续（血量不健康也继续，直到防御分支接管）
+     *   - 满血且钱包货币 ≤ 30 → 主动出击（不受探测距离限制），替代采矿/游荡
      *   - 否则要求：敌人在探测范围内 && 血量健康
      */
     _condEngage() {
         const p = this.perception;
         if (!p.nearestEnemy) return false;
         if (this.combatTarget && this.combatTarget.health > 0) return true;
+
+        // 满血且钱包穷 → 主动出击，不再采矿
+        if (this._shouldBeAggressive()) return true;
+
         return p.nearestEnemy.dist < ENEMY_DETECT_RANGE && p.hpRatio >= HEALTHY_HP_RATIO;
     }
 
@@ -479,19 +486,24 @@ export default class BotController {
     /** 有可采矿物（目标记忆有效或附近存在矿物） */
     _condMineAvail() {
         const p = this.perception;
-        if (this.mineralTarget && !this.mineralTarget.collected) return true;
+        // 目标记忆失效（被采完 / 被其他玩家锁定）→ 丢弃，改看感知
+        if (this.mineralTarget && !this._isMineralClaimable(this.mineralTarget)) {
+            this.mineralTarget = null;
+        }
+        if (this.mineralTarget) return true;
         return !!p.nearestMineral;
     }
 
     /** 已到达矿物（以目标记忆优先） */
     _condAtMineral() {
         const p = this.perception;
-        if (this.mineralTarget && !this.mineralTarget.collected) {
+        if (this.mineralTarget && this._isMineralClaimable(this.mineralTarget)) {
             return Math.hypot(
                 this.self.x - this.mineralTarget.data.x,
                 this.self.y - this.mineralTarget.data.y
             ) <= MINING_RANGE;
         }
+        // 目标记忆失效 → 最近矿物就在脚下也可直接开采
         return !!p.nearestMineral && p.nearestMineral.dist <= MINING_RANGE;
     }
 
@@ -624,10 +636,10 @@ export default class BotController {
             this._clearActivities(self);
             return BTStatus.FAILURE; // 交给防御分支
         }
-        if (targetDist > ENEMY_DETECT_RANGE * 1.5) {
+        if (targetDist > ENEMY_DETECT_RANGE * 1.5 && !this._shouldBeAggressive()) {
             this.combatTarget = null;
             this._clearActivities(self);
-            return BTStatus.FAILURE; // 目标太远，放弃追击
+            return BTStatus.FAILURE; // 目标太远，放弃追击（主动出击时无视距离继续追）
         }
 
         this._clearActivities(self);
@@ -844,7 +856,8 @@ export default class BotController {
         this._setAction(BotState.MOVING_TO_MINERAL);
 
         let target = this.mineralTarget;
-        if (!target || target.collected) {
+        // 目标失效（被采完 / 被其他玩家锁定）→ 重新从感知中选目标
+        if (!target || !this._isMineralClaimable(target)) {
             target = p.nearestMineral?.ref || null;
             this.mineralTarget = target;
         }
@@ -873,6 +886,16 @@ export default class BotController {
             this.mineralTarget = p.nearestMineral.ref;
         }
         const target = this.mineralTarget;
+
+        // ---- 矿物已被采集 / 被其他玩家锁定 → 开采失败，重新选目标 ----
+        if (!this._isMineralClaimable(target)) {
+            self.mining = false;
+            self.miningTime = 0;
+            self.miningTarget = null;
+            self.canMine = false;
+            this.mineralTarget = null;
+            return BTStatus.FAILURE;
+        }
 
         // ---- 矿物已被采集 → 开采完成 ----
         if (target.collected) {
@@ -943,6 +966,8 @@ export default class BotController {
         let nearestMineralDist = Infinity;
         for (const m of world.minerals) {
             if (m.collected) continue;
+            // 被其他玩家锁定开采 → 不可用
+            if (m.miner && m.miner !== self.sessionId) continue;
             const d = dist(self, m.data);
             minerals.push({ ref: m, dist: d });
             if (d < nearestMineralDist) {
@@ -1062,6 +1087,30 @@ export default class BotController {
             this.shoppingActive || this.capturingActive ||
             !!this.mineralTarget || !!this.outpostTarget ||
             !!this._shopDecision || !!this._captureDecision;
+    }
+
+    /**
+     * 判断该矿物是否仍可被本 bot 开采：
+     * 未被采完，且未被其他玩家锁定（自己锁定的可以继续）。
+     *
+     * @param {import('../entity/mineral.js').default|null} target
+     * @returns {boolean}
+     */
+    _isMineralClaimable(target) {
+        const self = this.self;
+        return !!target && !target.collected &&
+            (!target.miner || (self && target.miner === self.sessionId));
+    }
+
+    /**
+     * 主动出击判定：满血且钱包货币 ≤ AGGRESSIVE_MONEY_MAX。
+     * 此时人机不再采矿/游荡，转而主动追击最近的敌人。
+     *
+     * @returns {boolean}
+     */
+    _shouldBeAggressive() {
+        const p = this.perception;
+        return p.self.health >= p.self.maxHealth && p.money <= AGGRESSIVE_MONEY_MAX;
     }
 
     /**
