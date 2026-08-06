@@ -62,6 +62,8 @@ class World {
         // 初始化地图
         const mapData = JSON.parse(fs.readFileSync(`./src/game/map/${this.map_id}.json`, 'utf-8'));
         this.map_id = mapData.assetId;
+        /** 地图尺寸（像素），供 A* 寻路等需要地图边界的模块使用 */
+        this.mapSize = mapData.mapSize || { width: 2560, height: 7200 };
         for (const entity of mapData.entities) {
             if (entity.type === 'title') {
                 const titleEntity = new Title(entity);
