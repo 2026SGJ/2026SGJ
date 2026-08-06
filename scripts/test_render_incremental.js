@@ -86,7 +86,7 @@ const buildPacket = (sid) => {
     }
     for (const [pid, p] of Object.entries(players)) {
         if (state.seenPlayers.has(pid)) {
-            if (p._lastChangeTick > last) packet.push(p._lastRenderData || p.remoteData());
+            if (p._lastChangeTick > last) packet.push(p.remoteData());
         } else {
             state.seenPlayers.add(pid);
             packet.push(p.remoteData());

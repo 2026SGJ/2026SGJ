@@ -811,6 +811,7 @@ export default class BotController {
             this.capturingActive = false;
             return BTStatus.FAILURE;
         }
+        const target = this.mineralTarget;
 
         // ---- 站定占领 ----
         this.capturingActive = true;
