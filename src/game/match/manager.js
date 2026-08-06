@@ -2,6 +2,7 @@ import process from 'process';
 import room from '../../network/index.js';
 import BotPlayer, { BOT_PREFIX } from './bot/BotPlayer.js';
 import { BASE_MAX_HP } from './entity/base.js';
+import { pushChat } from '../chat.js';
 
 /**
  * MatchManager — 对局匹配与胜负判定管理器
@@ -267,11 +268,21 @@ class MatchManager {
         const chosenTeam = team || this._pickTeamWithFewerPlayers();
         this.game.botCounter++;
         const botId = `${BOT_PREFIX}${this.game.botCounter}`;
-        const bot = new BotPlayer(botId, { team: chosenTeam, hero: 'newton' });
+        const botName = `人机${this.game.botCounter}`;
+        const bot = new BotPlayer(botId, { team: chosenTeam, hero: 'newton', name: botName });
         // 行动许可跟随阶段：匹配中仅能移动，对局中可完全行动
         bot.canAct = this.phase === Phase.PLAYING || this.phase === Phase.SUDDEN_DEATH;
         this.game.players[botId] = bot;
         console.log(`[Match] 人机加入: ${botId} → ${chosenTeam} 队（当前共 ${this.totalPlayers()} 人）`);
+        // 公屏播报：人机加入（真人加入由 Game 层播报）
+        pushChat({
+            type: 'player_join',
+            player: botId,
+            name: botName,
+            team: chosenTeam,
+            isBot: true,
+            text: `[系统] ${botName} 加入了战斗（${chosenTeam}队）`,
+        });
         return bot;
     }
 
@@ -287,10 +298,20 @@ class MatchManager {
 
         const target =
             bots.find(id => this.game.players[id].team === preferredTeam) || bots[0];
+        const bot = this.game.players[target];
         delete this.game.players[target];
         // 增量渲染下客户端沿用上一帧：被踢人机必须显式通知其他客户端不再跟踪，
         // 否则客户端会持续保留该人机的缓存（幽灵 + 内存泄漏）
         this.game.world.markEntityRemoved({ id: target });
+        // 公屏播报：人机退出（为真人让位）
+        pushChat({
+            type: 'player_leave',
+            player: target,
+            name: bot?.name || target,
+            team: bot?.team,
+            isBot: true,
+            text: `[系统] ${bot?.name || target} 退出了战斗`,
+        });
         console.log(`[Match] 人机被踢出（为真人让位）: ${target}`);
         return true;
     }

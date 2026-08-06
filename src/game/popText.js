@@ -114,10 +114,7 @@ const prunePopTexts = (now = Date.now()) => {
         if (now - item.createdAt > item.duration + 1000) {
             popTextQueue.splice(i, 1);
         }
-    };
-
-    for (const sessionId of Object.keys(players)) send(sessionId);
-    for (const sessionId of Object.keys(spectators)) send(sessionId);
+    }
 };
 
 export { pushPopText, buildPopTextEntries, prunePopTexts };
