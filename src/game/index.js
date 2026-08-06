@@ -18,6 +18,17 @@ class Game {
     constructor() {
         this.matchLoop = null;
         this.players = {};  // sessionId → Player（含 BotPlayer）
+        /**
+         * 旁观者：sessionId → { sessionId, joinedAt }
+         *
+         * 对局已开始（playing / suddenDeath / finished）后加入的玩家成为旁观者：
+         *   - 不进入 players，不作为玩家对待（不参与匹配 / 战斗 / 结算 / 商店等）
+         *   - 不被任何玩家渲染（不在 players 中，故任何渲染包都不包含旁观者）
+         *   - 旁观者之间互不可见（其渲染包只包含 players 中的真实玩家与人机）
+         *   - 仅向其发送状态（S2CRender）与聊天信息（S2CChat）
+         * @type {Object<string, {sessionId: string, joinedAt: number}>}
+         */
+        this.spectators = {};
         this.world = null;
         /** @type {number} Bot 编号计数器 */
         this.botCounter = 0;
@@ -51,8 +62,8 @@ class Game {
             matchLoop(this.players, this.world);
             // 对局匹配 / 阶段 / 胜负判定管理（匹配广播、人机补位、基地伤害、死绝判负等）
             this.match.tick();
-            // 广播本 tick 内产生的漂浮文字（伤害显示 S2CPopText）
-            flushPopText(this.players);
+            // 广播本 tick 内产生的漂浮文字（伤害显示 S2CPopText，旁观者同样接收）
+            flushPopText(this.players, this.spectators);
             // 同步所有玩家的物品栏（仅在变动时发送）
             for (const sessionId of Object.keys(this.players)) {
                 this._syncInventory(sessionId);
@@ -65,12 +76,42 @@ class Game {
 
         playerEvent.on('beforeNewPlayerAdded', ({ sessionId, uuid, event }) => {
             try {
-                // ---------- 满员 / 非匹配阶段：拒绝加入 ----------
-                // 匹配阶段满 8 名真人（4v4 满员），或对局已开始后，不再接受新玩家
-                if (this.match.phase !== 'matching' || this.match.realPlayerCount() >= 8) {
+                // ---------- 非匹配阶段：以旁观者身份加入 ----------
+                // 对局已开始后，新玩家不再被拒绝加入，而是成为旁观者：
+                // 不作为玩家对待，仅接收状态（S2CRender）与聊天信息（S2CChat）。
+                if (this.match.phase !== 'matching') {
+                    this.spectators[sessionId] = {
+                        sessionId,
+                        joinedAt: Date.now(),
+                    };
+                    // 初始化渲染增量同步状态（首次渲染全量发送，之后增量）
+                    this._renderStates[sessionId] = {
+                        lastSentTick: 0,
+                        seenEntities: new Set(),
+                        seenIds: new Set(),
+                        seenPlayers: new Set(),
+                    };
+                    console.log(
+                        `[Match] 游戏已开始（阶段=${this.match.phase}），` +
+                        `${sessionId} 以旁观者身份加入`
+                    );
+                    room.send('S2CChat', JSON.stringify({
+                        dest: sessionId,
+                        seq: 0,
+                        data: {
+                            type: 'spectator_joined',
+                            phase: this.match.phase,
+                            text: '[旁观] 对局已开始，你以旁观者身份加入（仅可观看，不可操作）。',
+                        },
+                    }));
+                    return true;
+                }
+
+                // ---------- 匹配阶段满 8 名真人（4v4 满员）：拒绝加入 ----------
+                if (this.match.realPlayerCount() >= 8) {
                     console.log(
                         `[Match] 拒绝玩家加入 ${sessionId} ` +
-                        `（阶段=${this.match.phase}，真人=${this.match.realPlayerCount()}/8）`
+                        `（匹配阶段真人=${this.match.realPlayerCount()}/8）`
                     );
                     return false;
                 }
@@ -119,6 +160,14 @@ class Game {
 
         // 玩家移除（含对局内人机补位）
         playerEvent.on('playerRemoved', ({ sessionId, uuid, event }) => {
+            // 旁观者断开：仅清理旁观者记录与渲染状态（不作为玩家对待，
+            // 无需通知他人隐藏——旁观者本就不被任何人渲染）
+            if (this.spectators[sessionId]) {
+                delete this.spectators[sessionId];
+                delete this._renderStates[sessionId];
+                console.log(`Spectator removed: sessionId=${sessionId}, uuid=${uuid}`);
+                return;
+            }
             const removed = this.players[sessionId];
             if (removed) {
                 const team = removed.team;
@@ -370,11 +419,16 @@ class Game {
 
         // 渲染请求（dest 使用 sessionId）
         room.onMessage('C2SUpdateRender', ({ who, msg }) => {
-            const i = this.players[who.sessionId];
-            if (!i) return;
+            const sessionId = who.sessionId;
+            // 普通玩家与旁观者都可请求渲染。
+            // 旁观者包只含世界实体 + players（真实玩家与人机），
+            // 不含任何旁观者（旁观者不在 players 中）→ 旁观者之间互不可见。
+            const isPlayer = !!this.players[sessionId];
+            const isSpectator = !!this.spectators[sessionId];
+            if (!isPlayer && !isSpectator) return;
             // 组装增量渲染包：仅发送自上次请求以来变化 / 新增的实体与玩家，
             // 未变化的由客户端沿用上一帧（详见 _buildRenderPacket）
-            render(who.sessionId, this._buildRenderPacket(who.sessionId));
+            render(sessionId, this._buildRenderPacket(sessionId));
         });
     }
 

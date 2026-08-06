@@ -63,19 +63,21 @@ const pushPopText = (options = {}) => {
 };
 
 /**
- * 每 tick 由 Game 层调用：将队列中的漂浮文字广播给所有人类玩家
+ * 每 tick 由 Game 层调用：将队列中的漂浮文字广播给所有人类玩家与旁观者
  *
  * Bot 玩家无真实客户端连接，跳过。
  *
- * @param {Object<string, *>} players - sessionId → Player 映射
+ * @param {Object<string, *>} players — sessionId → Player 映射
+ * @param {Object<string, *>} [spectators={}] — sessionId → 旁观者记录
  */
-const flushPopText = (players) => {
+const flushPopText = (players, spectators = {}) => {
     if (popTextQueue.length === 0) return;
     const batch = popTextQueue.splice(0, popTextQueue.length);
 
-    for (const sessionId of Object.keys(players)) {
+    // 向单个接收者发送整批漂浮文字（玩家与旁观者共用）
+    const send = (sessionId) => {
         // Bot 玩家跳过网络同步（无对应客户端连接）
-        if (isBotSession(sessionId)) continue;
+        if (isBotSession(sessionId)) return;
 
         for (const item of batch) {
             room.send('S2CPopText', JSON.stringify({
@@ -84,7 +86,10 @@ const flushPopText = (players) => {
                 data: item,
             }));
         }
-    }
+    };
+
+    for (const sessionId of Object.keys(players)) send(sessionId);
+    for (const sessionId of Object.keys(spectators)) send(sessionId);
 };
 
 export { pushPopText, flushPopText };

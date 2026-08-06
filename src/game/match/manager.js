@@ -581,7 +581,7 @@ class MatchManager {
     // ====================================================================
 
     /**
-     * 向所有真人玩家发送 S2CChat 消息（人机无客户端连接，跳过）
+     * 向所有真人玩家及旁观者发送 S2CChat 消息（人机无客户端连接，跳过）
      *
      * 数据包格式：{ dest: sessionId, seq: 0, data: { type, text, ... } }
      *
@@ -590,6 +590,14 @@ class MatchManager {
     _sendChat(data) {
         for (const sessionId of Object.keys(this.game.players)) {
             if (String(sessionId).startsWith(BOT_PREFIX)) continue;
+            room.send('S2CChat', JSON.stringify({
+                dest: sessionId,
+                seq: 0,
+                data,
+            }));
+        }
+        // 旁观者同样接收聊天信息（对局广播）
+        for (const sessionId of Object.keys(this.game.spectators || {})) {
             room.send('S2CChat', JSON.stringify({
                 dest: sessionId,
                 seq: 0,
