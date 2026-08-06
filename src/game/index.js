@@ -29,24 +29,6 @@ import { pushPopText, buildPopTextEntries, prunePopTexts } from './popText.js';
 const FULL_RESYNC_TICKS = 100;
 
 /**
- * 世界实体全量重同步周期（tick 数）
- *
- * 增量渲染协议下，世界实体仅在「首次全量推送」或「数据发生变化」时发送，
- * 客户端约定缺失实体沿用上一帧。若客户端因网络抖动 / 中继丢包 / 加入竞态
- * 错过了首次全量推送，静态实体（墙体/标题/装饰）与长期不变更的动态实体
- * 将永远不会再被发送 —— 而玩家每帧都在变化会持续重发，最终表现就是
- * 「客户端只能看到玩家，看不到任何世界实体」。
- *
- * 该常量控制周期全量重同步：每经过 FULL_RESYNC_TICKS 个渲染 tick，
- * 强制清空每个客户端的 seenEntities（及 seenGui），令下一次渲染请求
- * 全量重推所有世界实体，保证任意客户端都能在有限时间内恢复完整世界。
- *
- * 100 tick = 5 秒（20 tick/s），全量包约 10KB，均摊带宽 ~2KB/s/客户端，
- * 换取「初始推送丢失后最多 5 秒自动恢复」的可靠性保障。
- */
-const FULL_RESYNC_TICKS = 100;
-
-/**
  * Game类
  * 游戏主逻辑
  * 以 sessionId 为 key 追踪玩家实体
