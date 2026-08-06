@@ -114,10 +114,10 @@ const prunePopTexts = (now = Date.now()) => {
         if (now - item.createdAt > item.duration + 1000) {
             popTextQueue.splice(i, 1);
         }
-    };
-
-    for (const sessionId of Object.keys(players)) send(sessionId);
-    for (const sessionId of Object.keys(spectators)) send(sessionId);
+    }
+    // 注意：漂浮文字已并入 S2CRender 渲染管线（由渲染请求经 buildPopTextEntries
+    // 按玩家去重投递），此前的 S2CPopText 广播逻辑（flushPopText）已在渲染重构时
+    // 移除，这里只负责清理过期条目，不再向任何客户端直接发送。
 };
 
 export { pushPopText, buildPopTextEntries, prunePopTexts };

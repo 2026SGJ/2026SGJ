@@ -204,10 +204,19 @@ class Shop extends Entity {
                 break;
             case 'speed':
                 if (effect.time && effect.time > 0) {
-                    const original = player.args.speed;
-                    player.args.speed += effect.amount || 0;
-                    setTimeout(() => { player.args.speed = original; }, effect.time);
+                    // 临时加速：使用 SpeedBuff 施加到玩家自身。
+                    // 不能直接修改 player.args.speed —— args 是 hero 全局配置对象
+                    // （所有同英雄玩家共享），直接加减会同时影响所有同英雄玩家甚至
+                    // 全局配置，且 setTimeout 还原也会殃及他人。
+                    const SpeedBuffClass = getBuffClassById('speed');
+                    player.giveBuff(new SpeedBuffClass({
+                        id: 'speed',
+                        level: Math.max(1, Math.round(((effect.amount || 0) / (player.args.speed || 1)) * 100)),
+                        time: effect.time,
+                    }));
                 } else {
+                    // 永久加速：仍会修改共享的 args 对象（影响所有同英雄玩家），
+                    // 缺少 per-player 基础速度字段，暂不做永久型商店道具（见 CHANGELOG）。
                     player.args.speed += effect.amount || 0;
                 }
                 break;
