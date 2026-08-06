@@ -30,6 +30,7 @@ export default class BotPlayer extends Player {
         super(sessionId, {
             team: data.team,
             hero: data.hero || 'newton',
+            name: data.name || '',
         });
 
         // 覆写：Bot 不需要通过真实网络发送

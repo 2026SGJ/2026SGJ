@@ -15,6 +15,7 @@ import PoisonDartEntity from '../item/poisonDart.js';
 import FreezeTrapEntity from '../item/freezeTrap.js';
 import HealingTotemEntity from '../item/healingTotem.js';
 import { pushPopText } from '../../popText.js';
+import { pushChat } from '../../chat.js';
 
 /** 夹取到 [-1, 1]（非有限数值返回 0） */
 const clamp1 = (v) => {
@@ -68,6 +69,8 @@ class Player {
 
     constructor(sessionId, data) {
         this.sessionId = sessionId;
+        /** @type {string} 玩家显示名（真人来自握手数据 name，人机在 addBot 时指定） */
+        this.name = data.name || '';
         /** @type {'A'|'B'} 玩家所属队伍 */
         this.team = data.team || 'A';
         // 队伍 A 出生点：底部基地 (1280, 6840)
@@ -1591,6 +1594,31 @@ class Player {
             // 击杀计数：计入攻击者（人机与真人同等地位，供“总击杀数”结算）
             if (attacker && attacker !== this) {
                 attacker.kills = (attacker.kills || 0) + 1;
+            }
+            // 公屏播报死亡：有击杀者时报击杀，否则（环境/自伤）报阵亡
+            const victimName = this.name || this.sessionId;
+            if (attacker && attacker !== this) {
+                pushChat({
+                    type: 'player_death',
+                    player: this.sessionId,
+                    name: victimName,
+                    team: this.team,
+                    killer: attacker.sessionId,
+                    killerName: attacker.name || attacker.sessionId,
+                    killerTeam: attacker.team,
+                    text: `[击杀] ${victimName}（${this.team}队）被 ${attacker.name || attacker.sessionId}（${attacker.team}队）击杀！`,
+                });
+            } else {
+                pushChat({
+                    type: 'player_death',
+                    player: this.sessionId,
+                    name: victimName,
+                    team: this.team,
+                    killer: null,
+                    killerName: null,
+                    killerTeam: null,
+                    text: `[死亡] ${victimName}（${this.team}队）阵亡了！`,
+                });
             }
             this.onDeath();
         }

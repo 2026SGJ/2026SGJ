@@ -9,6 +9,7 @@ import { render } from './render.js';
 import Shop from './match/item/shop.js';
 import ShopGui, { FAIL_REASON_TEXT } from './match/gui/shopGui.js';
 import { pushPopText, buildPopTextEntries, prunePopTexts } from './popText.js';
+import { pushChat, flushChat } from './chat.js';
 
 /**
  * 世界实体全量重同步周期（tick 数）
@@ -91,9 +92,8 @@ class Game {
             matchLoop(this.players, this.world);
             // 对局匹配 / 阶段 / 胜负判定管理（匹配广播、人机补位、基地伤害、死绝判负等）
             this.match.tick();
-            // 广播本 tick 内产生的漂浮文字（伤害显示 S2CPopText，旁观者同样接收）
-            flushPopText(this.players, this.spectators);
-            // 同步所有玩家的物品栏（仅在变动时发送）
+            // 广播本 tick 内产生的公屏聊天消息（玩家加入/退出/死亡播报）
+            flushChat();
             // 清理过期漂浮文字（并入 S2CRender 后由渲染请求按需投递）
             prunePopTexts();
             // 商店 GUI（isFixed 屏幕实体）开关 / 点击购买 / 手柄购买 —— 仅真人玩家
@@ -104,7 +104,7 @@ class Game {
             this._refreshRenderFingerprints();
         }, 1000 / 20); // 每秒20 Ticks
 
-        playerEvent.on('beforeNewPlayerAdded', ({ sessionId, uuid, event }) => {
+        playerEvent.on('beforeNewPlayerAdded', ({ sessionId, uuid, name, event }) => {
             try {
                 // ---------- 非匹配阶段：以旁观者身份加入 ----------
                 // 对局已开始后，新玩家不再被拒绝加入，而是成为旁观者：
@@ -169,8 +169,20 @@ class Game {
                 console.log(`[Team] ${sessionId} assigned to team ${assignedTeam} (A:${teamACount}, B:${teamBCount})`);
                 // ---------- 队伍分配 ----------
 
+                // 玩家显示名（握手数据未携带时退化为空，展示时回退 sessionId）
+                data.name = name || data.name || '';
+
                 this.players[sessionId] = new Player(sessionId, data);
                 console.log(`Player added: sessionId=${sessionId}, uuid=${uuid}`);
+                // 公屏播报：真人玩家加入（人机加入由 MatchManager.addBot 播报）
+                pushChat({
+                    type: 'player_join',
+                    player: sessionId,
+                    name: data.name || sessionId,
+                    team: assignedTeam,
+                    isBot: false,
+                    text: `[系统] ${data.name || sessionId} 加入了战斗（${assignedTeam}队）`,
+                });
                 // 初始化渲染增量同步状态（首次渲染全量发送，之后增量）
                 this._renderStates[sessionId] = {
                     lastSentTick: 0,
@@ -209,6 +221,15 @@ class Game {
             const removed = this.players[sessionId];
             if (removed) {
                 const team = removed.team;
+                // 公屏播报：玩家退出（对局内人机补位由 MatchManager.addBot 播报）
+                pushChat({
+                    type: 'player_leave',
+                    player: sessionId,
+                    name: removed.name || sessionId,
+                    team,
+                    isBot: false,
+                    text: `[系统] ${removed.name || sessionId} 退出了战斗`,
+                });
                 // 若离开时商店仍处于打开状态：释放商店占用记录（避免 SessionId 残留在 Set 中）
                 if (removed._openShop) {
                     removed._openShop.openedBy.delete(sessionId);
