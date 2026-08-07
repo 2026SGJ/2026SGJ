@@ -24,71 +24,87 @@
  * 客户端应按 permanent 在前、refresh 在后的顺序渲染。
  */
 export default {
-    /** 常驻商品：可以一直购买，无库存上限 */
-    permanent: [
-        {
-            id: 'shop_item_potion_health',
-            name: '治疗药水',
-            kind: 'potion-health',
-            price: 60,
-            effect: { kind: 'heal', amount: 400 },
-        },
-        {
-            id: 'shop_item_potion_speed',
-            name: '疾速药水',
-            kind: 'potion-speed',
-            price: 50,
-            effect: { kind: 'speed', amount: 3, time: 8000 },
-        },
-        {
-            id: 'shop_item_scroll_teleport',
-            name: '回城卷轴',
-            kind: 'scroll-teleport',
-            price: 40,
-            effect: { kind: 'teleport' },
-        },
-        {
-            id: 'shop_item_ward_vision',
-            name: '视野守卫',
-            kind: 'ward-vision',
-            price: 30,
-            effect: { kind: 'buff', buffId: 'damage', level: 0, time: 0 },
-        },
-    ],
+	/** 常驻商品：可以一直购买，无库存上限 */
+	permanent: [
+		{
+			id: "shop_item_potion_health",
+			name: "治疗药水",
+			kind: "potion-health",
+			price: 60,
+			effect: { kind: "heal", amount: 400 },
+		},
+		{
+			id: "shop_item_potion_speed",
+			name: "疾速药水",
+			kind: "potion-speed",
+			price: 50,
+			effect: { kind: "speed", amount: 3, time: 8000 },
+		},
+		{
+			id: "shop_item_scroll_teleport",
+			name: "回城卷轴",
+			kind: "scroll-teleport",
+			price: 40,
+			effect: { kind: "teleport" },
+		},
+		{
+			id: "shop_item_ward_vision",
+			name: "视野守卫",
+			kind: "ward-vision",
+			price: 30,
+			effect: { kind: "buff", buffId: "damage", level: 0, time: 0 },
+		},
+	],
 
-    /** 刷新商品池：每次刷新随机抽取一部分上架，有库存上限 */
-    refresh: [
-        {
-            id: 'shop_item_armor_plate',
-            name: '护甲板',
-            kind: 'armor-plate',
-            price: 150,
-            stock: 3,
-            effect: { kind: 'maxhealth', amount: 300 },
-        },
-        {
-            id: 'shop_item_buff_strength',
-            name: '力量药水',
-            kind: 'buff-strength',
-            price: 200,
-            stock: 3,
-            effect: { kind: 'buff', buffId: 'strength', level: 100, time: 10000 },
-        },
-        {
-            id: 'shop_item_buff_rebound',
-            name: '反伤护盾',
-            kind: 'buff-rebound',
-            price: 200,
-            stock: 3,
-            effect: { kind: 'buff', buffId: 'rebound', level: 40, time: 5000 },
-        },
-        {
-            id: 'shop_item_elixir_berserk',
-            name: '狂暴药剂',
-            kind: 'elixir-berserk',
-            price: 180,
-            stock: 2,
-            effect: { kind: 'buff', buffId: 'strength', level: 200, time: 6000 },
-        },
-    ],
+	/** 刷新商品池：每次刷新随机抽取一部分上架，有库存上限 */
+	refresh: [
+		{
+			id: "shop_item_trait_lottery",
+			name: "词条抽奖券",
+			kind: "trait-lottery",
+			price: 150,
+			stock: 1, // 库存固定为 1，每次刷新 40% 概率上架（见 Shop._rollRefresh）
+			effect: { kind: "trait-lottery" }, // 购买后随机抽取一个本英雄专属词条
+		},
+		{
+			id: "shop_item_robot_chip",
+			name: "机器人强化芯片",
+			kind: "robot-upgrade",
+			price: 120,
+			stock: 2,
+			effect: { kind: "robot-upgrade" }, // 随机为其 AI 机器人授予一个未拥有的机器人词条（如黄金矿工）
+		},
+		{
+			id: "shop_item_armor_plate",
+			name: "护甲板",
+			kind: "armor-plate",
+			price: 150,
+			stock: 3,
+			effect: { kind: "maxhealth", amount: 300 },
+		},
+		{
+			id: "shop_item_buff_strength",
+			name: "力量药水",
+			kind: "buff-strength",
+			price: 200,
+			stock: 3,
+			effect: { kind: "buff", buffId: "strength", level: 100, time: 10000 },
+		},
+		{
+			id: "shop_item_buff_rebound",
+			name: "反伤护盾",
+			kind: "buff-rebound",
+			price: 200,
+			stock: 3,
+			effect: { kind: "buff", buffId: "rebound", level: 40, time: 5000 },
+		},
+		{
+			id: "shop_item_elixir_berserk",
+			name: "狂暴药剂",
+			kind: "elixir-berserk",
+			price: 180,
+			stock: 2,
+			effect: { kind: "buff", buffId: "strength", level: 200, time: 6000 },
+		},
+	],
 };

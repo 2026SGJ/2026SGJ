@@ -5,4 +5,10 @@ export default {
     GAUSS: 'gauss',
     DESCARTES: 'descartes',
     DALTON: 'dalton',
+    MENDELEEV: 'mendeleev',
+    MORGAN: 'morgan',
+    LAVOISIER: 'lavoisier',
+    DARWIN: 'darwin',
+    ARCHIMEDES: 'archimedes',
+    TURING: 'turing',
 }
