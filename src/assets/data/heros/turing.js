@@ -16,14 +16,14 @@ export default {
             damage: 25,
             cd: 500,
             cost: 0,
-            forward: 150
+            forward: 100
         },
         skill1: {
             name: '死循环',
             description: '指定一名敌方英雄，使其陷入"逻辑死锁"。目标在接下来的 3 秒内无法释放任何技能，且下一次普攻伤害降低 50%（引擎内以眩晕近似无法释放技能）',
             cd: 12000,
             cost: 0,
-            forward: 350,
+            forward: 230,
             debuff: [
                 {
                     id: 'stun',
@@ -37,7 +37,7 @@ export default {
             description: '在指定区域生成一道持续 4 秒的逻辑屏障。敌方穿过：触发"系统冲突"，50% 概率被禁言（禁止移动）2 秒；50% 概率被强制加速（移速翻倍但无法攻击和释放技能）2 秒。友方穿过：获得一个持续 2 秒的护盾，并提升 20% 移速',
             cd: 16000,
             cost: 120,
-            forward: 400,
+            forward: 260,
             buff: [
                 {
                     id: 'shield',
@@ -56,7 +56,7 @@ export default {
             damage: 120,
             cd: 20000,
             cost: 180,
-            forward: 400,
+            forward: 260,
             debuff: [
                 {
                     id: 'stun',
@@ -71,7 +71,7 @@ export default {
             damage: 200,
             cd: 22000,
             cost: 200,
-            forward: 500,
+            forward: 330,
             debuff: [
                 {
                     id: 'stun',

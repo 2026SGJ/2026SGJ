@@ -17,7 +17,7 @@ export default {
             knockback: 2.5, // 击退效果，数值越大击退越远
             cd: 500, // 两次使用之间的最小间隔时间，单位：毫秒
             cost: 0, // 解锁技能消耗的经济值
-            forward: 180 // 从开始攻击到攻击生效的时间间隔，单位：毫秒
+            forward: 120 // 从开始攻击到攻击生效的时间间隔，单位：毫秒
         },
         skill1: {
             name: '质量抛掷',
@@ -26,7 +26,7 @@ export default {
             knockback: 5, // 击退效果，数值越大击退越远
             cd: 8000, // 两次使用之间的最小间隔时间，单位：毫秒
             cost: 0,
-            forward: 350,
+            forward: 230,
             debuff: [ // debuff施加给目标玩家
                 {
                     id: 'freeze', // buff 的唯一标识符
@@ -41,7 +41,7 @@ export default {
             cd: 7000,
             cost: 120,
             knockback: -5, // 负数表示吸引，正数表示击退
-            forward: 500,
+            forward: 330,
             debuff: [
                 {
                     id: 'damage',
@@ -55,7 +55,7 @@ export default {
             description: '2秒内攻击伤害提升 200%（普攻伤害提升至 120），并对周围造成 150 点 溅射伤害',
             cd: 5000,
             cost: 80,
-            forward: 300,
+            forward: 200,
             buff: [ // buff施加给自身
                 {
                     id: 'strength',
@@ -74,7 +74,7 @@ export default {
             description: '激活后持续 8 秒。期间牛顿受到的所有伤害减少40%反弹给攻击者',
             cd: 15000,
             cost: 150,
-            forward: 1500,
+            forward: 800,
             buff: [
                 {
                     id: 'rebound',

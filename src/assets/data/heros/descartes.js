@@ -16,7 +16,7 @@ export default {
             damage: 30,
             cd: 500,
             cost: 0,
-            forward: 150
+            forward: 100
         },
         skill1: {
             name: '空间折叠',
@@ -24,7 +24,7 @@ export default {
             damage: 50,
             cd: 10000,
             cost: 0,
-            forward: 350,
+            forward: 230,
             debuff: [
                 {
                     id: 'stun',
@@ -39,14 +39,14 @@ export default {
             damage: 150,
             cd: 8000,
             cost: 100,
-            forward: 400
+            forward: 260
         },
         skill3: {
             name: '维度降维',
             description: '将指定区域（半径 200 码）内的敌方单位"降维"为 2D 平面状态，持续 3 秒。降维期间，敌人无法使用位移技能，且受到的所有伤害增加 20%',
             cd: 15000,
             cost: 180,
-            forward: 400,
+            forward: 260,
             debuff: [ // "降维"标记
                 {
                     id: 'damage',
@@ -64,7 +64,7 @@ export default {
             description: '瞬间交换自身与一名队友（或 AI）的位置，并为双方提供一个持续 4 秒、吸收 200 点伤害的"几何护盾"',
             cd: 25000,
             cost: 220,
-            forward: 350,
+            forward: 230,
             buff: [
                 {
                     id: 'shield',

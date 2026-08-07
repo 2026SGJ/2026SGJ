@@ -16,7 +16,7 @@ export default {
             damage: 35,
             cd: 500,
             cost: 0,
-            forward: 150
+            forward: 100
         },
         skill1: {
             name: '人工授粉',
@@ -24,7 +24,7 @@ export default {
             damage: 25,
             cd: 12000,
             cost: 0,
-            forward: 300,
+            forward: 200,
             debuff: [ // "杂交靶标"标记（引擎内为无伤害的伤害标记，用于客户端展示）
                 {
                     id: 'damage',
@@ -38,7 +38,7 @@ export default {
             description: '在指定区域种下豌豆炮台，持续 12 秒。每秒对周围 200 码内的敌人造成 25 点伤害，并为孟德尔提供 5 点/秒的生命回复',
             cd: 10000,
             cost: 120,
-            forward: 400,
+            forward: 260,
             debuff: [ // 炮台对主目标的持续伤害
                 {
                     id: 'damage',
@@ -56,7 +56,7 @@ export default {
             description: '献祭当前 15% 的最大生命值，立即刷新所有基础技能冷却时间，并获得一个等同于献祭生命值 200% 的临时护盾（引擎内以固定护盾近似）',
             cd: 18000,
             cost: 180,
-            forward: 300,
+            forward: 200,
             buff: [
                 {
                     id: 'shield',
@@ -70,7 +70,7 @@ export default {
             description: '与 AI 助手或一名队友建立共生链接，持续 10 秒。期间双方共享 30% 的伤害与治疗，且孟德尔的普攻会为目标叠加"共生印记"（每层提升 3% 伤害，最高叠 5 层）',
             cd: 25000,
             cost: 220,
-            forward: 300,
+            forward: 200,
             buff: [
                 {
                     id: 'strength',

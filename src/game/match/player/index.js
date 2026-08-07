@@ -86,6 +86,10 @@ const deepCloneHeroData = (data, heroId) => {
  */
 class Player {
 	static TICK_MS = 1000 / 20; // 每 tick 的毫秒数（20 ticks/s）
+	/** 受击动画持续时长（毫秒）：受击后播放 hurt，随后恢复 idle/run/攻击 */
+	static HURT_ANIM_MS = 250;
+	/** 普攻命中后的收招动画持续时长（毫秒）：attack_end 过渡回 idle/run */
+	static ATTACK_END_MS = 200;
 
 	constructor(sessionId, data) {
 		this.sessionId = sessionId;
@@ -120,6 +124,10 @@ class Player {
 		this.runAnimate = 0;
 		this.attackForward = 0;
 		this.attacking = false;
+		/** @type {number} 受击动画结束时间戳（Date.now()），未受击时为 0 */
+		this.hurtUntil = 0;
+		/** @type {number} 普攻收招动画结束时间戳（Date.now()），命中后短暂展示 attack_end */
+		this.attackEndUntil = 0;
 
 		// ---------- 多技能系统 ----------
 		/** @type {number} 当前选中的技能索引：1=skill1, 2=skill2, 3=skill3, 4=skill4 */
@@ -363,11 +371,48 @@ class Player {
 	}
 
 	// ---------- 动画 ----------
+	//
+	// 优先级（高 → 低）：
+	//   1. hurt          — 受击硬直（takeDamage 设置 hurtUntil）
+	//   2. attack2/attack3 — 技能前摇（usingSkill 且 skillCastForward > 0）
+	//   3. attack1       — 普攻前摇（attacking 且 attackForward > 0）
+	//   4. attack_end    — 普攻命中后的收招过渡（attackEndUntil）
+	//   5. idle / run    — 静止 / 移动
 	animate() {
+		const now = Date.now();
+
+		// 1. 受击动画（优先级最高，短暂硬直）
+		if (now < this.hurtUntil) {
+			this.animateState = "hurt";
+			return "hurt";
+		}
+
+		// 2. 技能前摇动画：奇数技能用 attack2，偶数技能用 attack3（区分不同技能的起手）
+		if (this.usingSkill && this.skillCastForward > 0) {
+			const castAnim = this.selectedSkill % 2 === 0 ? 3 : 2;
+			this.animateState = `attack${castAnim}`;
+			return `attack${castAnim}`;
+		}
+
+		// 3. 普攻前摇动画
+		if (this.attacking && this.attackForward > 0) {
+			this.animateState = "attack1";
+			return "attack1";
+		}
+
+		// 4. 普攻收招动画（命中后短暂过渡，避免直接弹回 idle/run）
+		if (now < this.attackEndUntil) {
+			this.animateState = "attack_end";
+			return "attack_end";
+		}
+
+		// 5. 静止
 		if (this.speed.lengthSq() == 0) {
 			this.animateState = "idle";
 			return "idle";
 		}
+
+		// 6. 跑步
 		this.runAnimate =
 			(this.runAnimate +
 				this.speed.length() / (1.41421356 * 3 * this.args.speed)) %
@@ -1378,6 +1423,8 @@ class Player {
 
 			// 记录冷却
 			this.skillCooldowns[0] = Date.now();
+			// 普攻出手：短暂展示收招动画（attack_end）过渡回 idle/run
+			this.attackEndUntil = Date.now() + Player.ATTACK_END_MS;
 
 			const target = this.findTarget(players, robots);
 			if (target) {
@@ -1771,6 +1818,16 @@ class Player {
 					`[Combat] ${this.sessionId} reflected ${Math.round(reflected)} damage ` +
 						`back to ${attacker.sessionId} (${(this._reboundPercent * 100).toFixed(0)}%)`,
 				);
+			}
+		}
+
+		// ----- 受击动画 -----
+		// 受击后短暂播放 hurt；仅在未处于受击状态时刷新，
+		// 避免灼烧/毒等高频伤害把动画锁死在受击态
+		if (finalAmount > 0) {
+			const now = Date.now();
+			if (now >= this.hurtUntil) {
+				this.hurtUntil = now + Player.HURT_ANIM_MS;
 			}
 		}
 

@@ -16,7 +16,7 @@ export default {
             damage: 25,
             cd: 500,
             cost: 0,
-            forward: 150,
+            forward: 100,
             debuff: [ // "基因弱点"标记
                 {
                     id: 'damage',
@@ -31,14 +31,14 @@ export default {
             damage: 25,
             cd: 10000,
             cost: 0,
-            forward: 300
+            forward: 200
         },
         skill2: {
             name: '基因测序',
             description: '对一名敌方单位进行测序，持续 5 秒。测序期间，该目标受到的所有伤害增加 15%，且其位置在小地图上持续暴露',
             cd: 8000,
             cost: 100,
-            forward: 350,
+            forward: 230,
             debuff: [ // "测序"标记
                 {
                     id: 'damage',
@@ -52,7 +52,7 @@ export default {
             description: '使一名队友获得"变异"状态，持续 6 秒。变异期间，该队友的普攻会额外触发一次 50% 伤害的基因打击，且每次攻击回复 10 点生命值',
             cd: 15000,
             cost: 180,
-            forward: 300,
+            forward: 200,
             buff: [
                 {
                     id: 'strength',
@@ -66,7 +66,7 @@ export default {
             description: '对一名敌方英雄释放，窃取其当前 10% 的移动速度，并将其转化为自身的攻击力加成，持续 8 秒。若目标处于"基因弱点"状态，则窃取效果翻倍',
             cd: 25000,
             cost: 220,
-            forward: 400,
+            forward: 260,
             buff: [
                 {
                     id: 'speed',

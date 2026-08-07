@@ -16,7 +16,7 @@ export default {
             damage: 25,
             cd: 500,
             cost: 0,
-            forward: 150
+            forward: 100
         },
         skill1: {
             name: '磁力牵引',
@@ -25,7 +25,7 @@ export default {
             knockback: -100, // 负数 = 拉近
             cd: 8000,
             cost: 0,
-            forward: 300
+            forward: 200
         },
         skill2: {
             name: '高斯步枪',
@@ -33,14 +33,14 @@ export default {
             damage: 220,
             cd: 6000,
             cost: 120,
-            forward: 400
+            forward: 260
         },
         skill3: {
             name: '磁场偏转',
             description: '消耗 30 点"磁场值"，在自身周围生成磁场护盾，持续 4 秒。护盾存在期间，反弹 30% 的远程弹道攻击，并减少受到的 20% 伤害',
             cd: 12000,
             cost: 150,
-            forward: 300,
+            forward: 200,
             buff: [
                 {
                     id: 'shield',
@@ -54,7 +54,7 @@ export default {
             description: '在指定区域部署磁场发生器，持续 8 秒。区域内敌方单位无法积攒"过载值/能量"，且每次释放技能都会受到 80 点真实伤害',
             cd: 20000,
             cost: 200,
-            forward: 400,
+            forward: 260,
             debuff: [ // 干扰区域持续伤害
                 {
                     id: 'damage',

@@ -16,14 +16,14 @@ export default {
             damage: 45,
             cd: 500,
             cost: 0,
-            forward: 150
+            forward: 100
         },
         skill1: {
             name: '支点放置',
             description: '在指定位置放置一个"支点"（地形造物），最多同时存在 3 个，持续 15 秒。敌方英雄距离支点 200 码内时，阿基米德对其造成的伤害提升 20%（杠杆定律）',
             cd: 6000,
             cost: 0,
-            forward: 250,
+            forward: 160,
             magic: { // 支点落点对周围敌人造成少量伤害
                 damage: 15,
                 range: 120
@@ -34,7 +34,7 @@ export default {
             description: '在指定位置生成一道长 300 码、宽 50 码的"不可跨越的力场墙"，持续 4 秒。敌方单位无法穿过，但阿基米德和友方单位可以。墙体具有 350 点生命值（引擎内以护盾近似墙体承伤）',
             cd: 14000,
             cost: 100,
-            forward: 400,
+            forward: 260,
             buff: [
                 {
                     id: 'shield',
@@ -48,7 +48,7 @@ export default {
             description: '在指定区域生成一个直径 200 码的"重力陷阱"（地形），持续 5 秒。处于陷阱内的敌方单位，移速降低 40%，且无法使用位移技能',
             cd: 16000,
             cost: 150,
-            forward: 400,
+            forward: 260,
             debuff: [ // 陷阱短暂困住目标
                 {
                     id: 'freeze',
@@ -68,7 +68,7 @@ export default {
             knockback: -150, // 向支点方向拉扯
             cd: 45000,
             cost: 200,
-            forward: 750,
+            forward: 500,
             magic: {
                 damage: 120,
                 knockback: -150,

@@ -16,7 +16,7 @@ export default {
             damage: 20,
             cd: 500,
             cost: 0,
-            forward: 150,
+            forward: 100,
             debuff: [
                 {
                     id: 'poison', // 腐蚀
@@ -30,7 +30,7 @@ export default {
             description: '释放一团惰性气体包裹自身，持续 4 秒。期间受到的伤害减少 90%，但自身无法进行攻击和释放技能，且移速降低 30%',
             cd: 12000,
             cost: 0,
-            forward: 400,
+            forward: 260,
             buff: [
                 {
                     id: 'invisible', // 90% 减伤 + 无法攻击
@@ -44,7 +44,7 @@ export default {
             description: '在指定区域泼洒强酸，持续 5 秒。区域内敌人每秒受到 40 点伤害，且护盾恢复速度降低 50%。对建筑额外造成 30% 伤害',
             cd: 8000,
             cost: 100,
-            forward: 400,
+            forward: 260,
             debuff: [ // 酸池持续腐蚀
                 {
                     id: 'poison',
@@ -62,7 +62,7 @@ export default {
             description: '与一名队友建立链接，持续 6 秒。期间双方受到的伤害由两人平摊，且链接期间双方移速提升 15%',
             cd: 12000,
             cost: 150,
-            forward: 300,
+            forward: 200,
             buff: [
                 {
                     id: 'speed',
@@ -77,7 +77,7 @@ export default {
             damage: 150,
             cd: 20000,
             cost: 200,
-            forward: 400,
+            forward: 260,
             magic: {
                 damage: 150,
                 range: 250
