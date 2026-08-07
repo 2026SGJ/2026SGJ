@@ -245,6 +245,12 @@ class World {
             mineral.tryRespawn(now);
         }
 
+        // ---- 商店商品刷新（到点重新随机抽取刷新商品并补满库存） ----
+        // 商店刷新列表变化会经 ShopSession.tick 的指纹比对推送最新 S2CShopList
+        for (const shop of this.shops) {
+            shop.tick();
+        }
+
         // ---- 更新前哨站占领进度 ----
         // 注意：匹配阶段玩家 canAct=false，tickCapture 内部会跳过，
         // 因此前哨站仅在对局开始后才可能被占领。

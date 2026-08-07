@@ -163,6 +163,32 @@ room.onMessage('C2SBuyItem', (message) => {
 });
 
 // ============================================================
+//  C2SOpenShop — 打开商店请求（商店独立协议，与渲染管线解耦）
+// ============================================================
+room.onMessage('C2SOpenShop', (message) => {
+    const sessionId = message.who.sessionId;
+    if (!activeSessions.has(sessionId)) {
+        console.log(`C2SOpenShop from unknown session ${sessionId} ignored.`);
+        return;
+    }
+    const uuid = message.who.extra.uuid;
+    playerEvent.trigger('openShop', { sessionId, uuid, event: message.msg });
+});
+
+// ============================================================
+//  C2SCloseShop — 关闭商店请求（商店独立协议，与渲染管线解耦）
+// ============================================================
+room.onMessage('C2SCloseShop', (message) => {
+    const sessionId = message.who.sessionId;
+    if (!activeSessions.has(sessionId)) {
+        console.log(`C2SCloseShop from unknown session ${sessionId} ignored.`);
+        return;
+    }
+    const uuid = message.who.extra.uuid;
+    playerEvent.trigger('closeShop', { sessionId, uuid, event: message.msg });
+});
+
+// ============================================================
 //  C2SUseItem — 使用道具请求
 // ============================================================
 room.onMessage('C2SUseItem', (message) => {
