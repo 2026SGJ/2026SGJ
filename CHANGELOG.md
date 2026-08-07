@@ -2,6 +2,16 @@
 
 本文档记录本次代码审阅与修复的变更内容，以及审阅中发现但暂未修改的问题（拿不准、交由后续确认）。
 
+## --no-wait 测试模式（首个玩家进入即满员开赛）
+
+- **`src/index.js`**：解析命令行参数 `--no-wait`，透传给 Game（启动时打印启用日志）。
+- **`src/game/index.js`**：`Game` 构造函数接收 `options`，将 `noWait` 透传给 `MatchManager`。
+- **`src/game/match/manager.js`**：
+  - 构造函数新增 `options.noWait` 开关；
+  - `onHumanJoined` 新增分支：`--no-wait` 模式下首个真人进入匹配时，跳过 120 秒倒计时，立即 `ensureTotalPlayers(8)` 瞬间补齐 7 个人机（4v4 满员）并直接 `_startGame()` 开赛；
+  - 后续真人加入时对局已开始，按既有逻辑自动转为旁观者，不重复触发。
+- **`package.json`**：新增 `start:nowait` 脚本（`node src/index.js --no-wait`）。
+
 ## AI 机器人系统（AI 机器人 ≠ 人机补位）
 
 ### 核心定位（desc.txt 第二节）
