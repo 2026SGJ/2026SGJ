@@ -23,6 +23,7 @@
 
 import { isLLMEnabled, queryLLM, getLLMConfig } from './llmDecision.js';
 import Shop from '../item/shop.js';
+import { TRAIT_LOTTERY_PRICE } from '../../../assets/data/traits/index.js';
 import {
     BTStatus,
     Selector,
@@ -766,6 +767,23 @@ export default class BotController {
                 // 没有合适的道具可买 → 离开
                 this._exitShopping(self);
                 return BTStatus.SUCCESS;
+            }
+        }
+
+        // 词条抽奖：人机也会获得词条（每 45 tick 尝试一次，词条未抽完且钱够时）
+        if (
+            this.shopStayTimer % 45 === 0 &&
+            self.traitManager &&
+            !self.traitManager.poolExhausted() &&
+            self.money >= TRAIT_LOTTERY_PRICE
+        ) {
+            const trait = self.traitManager.draw();
+            if (trait) {
+                self.money -= TRAIT_LOTTERY_PRICE;
+                self.traitManager.grant(trait.id);
+                console.log(
+                    `[Bot] ${self.sessionId} 词条抽奖 → 【${trait.name}】(${trait.rarity})`
+                );
             }
         }
 
