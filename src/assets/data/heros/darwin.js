@@ -16,14 +16,14 @@ export default {
             damage: 40,
             cd: 500,
             cost: 0,
-            forward: 150
+            forward: 100
         },
         skill1: {
             name: '自然选择',
             description: '达尔文引导周围的生物能量，强化指定的一名友方单位（优先机器人），使其体型变大，攻击力提升 30%，且普攻附带 20% 的溅射伤害，持续 8 秒',
             cd: 12000,
             cost: 0,
-            forward: 300,
+            forward: 200,
             buff: [
                 {
                     id: 'strength',
@@ -38,7 +38,7 @@ export default {
             damage: 50,
             cd: 14000,
             cost: 120,
-            forward: 400,
+            forward: 260,
             magic: {
                 damage: 50,
                 range: 250
@@ -49,7 +49,7 @@ export default {
             description: '达尔文与周围 300 码内的所有友方单位建立"共生链接"，持续 6 秒。期间，友方单位受到的伤害由达尔文分摊 30%，且达尔文的每次普攻都会为所有友方单位回复 15 点生命值',
             cd: 16000,
             cost: 150,
-            forward: 300,
+            forward: 200,
             buff: [
                 {
                     id: 'shield',
@@ -64,7 +64,7 @@ export default {
             damage: 100,
             cd: 45000,
             cost: 200,
-            forward: 600,
+            forward: 400,
             magic: {
                 damage: 100,
                 range: 400

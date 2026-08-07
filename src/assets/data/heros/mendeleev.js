@@ -16,14 +16,14 @@ export default {
             damage: 25,
             cd: 500,
             cost: 0,
-            forward: 150
+            forward: 100
         },
         skill1: {
             name: '周期律共鸣',
             description: '统计场上所有带有"元素状态"的敌方单位数量。每有一个，为自身和周围 400 码内的队友提供 5% 的攻击力加成，持续 5 秒（最高叠加 4 层）',
             cd: 15000,
             cost: 0,
-            forward: 300,
+            forward: 200,
             buff: [
                 {
                     id: 'strength',
@@ -38,7 +38,7 @@ export default {
             damage: 200,
             cd: 10000,
             cost: 120,
-            forward: 400,
+            forward: 260,
             magic: {
                 damage: 200,
                 range: 200
@@ -49,7 +49,7 @@ export default {
             description: '为一名队友施加一个持续 5 秒的护盾。护盾存在期间，该队友的普攻会额外附加随机元素伤害',
             cd: 12000,
             cost: 150,
-            forward: 300,
+            forward: 200,
             buff: [
                 {
                     id: 'shield',
@@ -63,7 +63,7 @@ export default {
             description: '在指定区域释放辐射，持续 6 秒。区域内敌人每秒叠加一层"辐射印记"，每层使其受到的所有伤害增加 5%（最高叠 10 层）',
             cd: 22000,
             cost: 200,
-            forward: 400,
+            forward: 260,
             debuff: [ // 辐射区域持续伤害
                 {
                     id: 'damage',

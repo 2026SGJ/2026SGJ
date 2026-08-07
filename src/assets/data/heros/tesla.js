@@ -16,7 +16,7 @@ export default {
             damage: 20,
             cd: 500,
             cost: 0,
-            forward: 150
+            forward: 100
         },
         skill1: {
             name: '静电场',
@@ -24,7 +24,7 @@ export default {
             damage: 0,
             cd: 10000,
             cost: 0,
-            forward: 300,
+            forward: 200,
             magic: { // 以自身为中心的 AOE
                 damage: 20,
                 range: 150
@@ -37,7 +37,7 @@ export default {
             knockback: 100,
             cd: 7000,
             cost: 120,
-            forward: 400,
+            forward: 260,
             magic: {
                 damage: 200,
                 knockback: 100,
@@ -49,7 +49,7 @@ export default {
             description: '消耗 30 点"过载值"，生成一个 250 点的等离子护盾，持续 5 秒。护盾存在期间，普攻变为穿透性电弧',
             cd: 12000,
             cost: 150,
-            forward: 300,
+            forward: 200,
             buff: [
                 {
                     id: 'shield',
@@ -63,7 +63,7 @@ export default {
             description: '部署一个持续 10 秒的线圈。每秒对周围 400 码内的敌人造成 50 点伤害，并强制吸取 10 点"过载值"给特斯拉',
             cd: 25000,
             cost: 250,
-            forward: 500,
+            forward: 330,
             debuff: [ // 主目标持续受线圈伤害
                 {
                     id: 'damage',

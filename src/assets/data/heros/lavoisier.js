@@ -16,7 +16,7 @@ export default {
             damage: 30,
             cd: 500,
             cost: 0,
-            forward: 150
+            forward: 100
         },
         skill1: {
             name: '剧烈放热',
@@ -24,7 +24,7 @@ export default {
             damage: 40,
             cd: 10000,
             cost: 0,
-            forward: 300,
+            forward: 200,
             buff: [ // 每引爆一层燃烧 +15 护盾（最多 3 层）
                 {
                     id: 'shield',
@@ -39,7 +39,7 @@ export default {
             damage: 40,
             cd: 6000,
             cost: 120,
-            forward: 400,
+            forward: 260,
             debuff: [ // 重新施加的"燃烧"
                 {
                     id: 'damage',
@@ -57,7 +57,7 @@ export default {
             description: '在指定区域生成一个透明的"密闭力场"，持续 5 秒。力场内的敌方单位无法回血；力场内的友方单位受到的燃烧伤害降低 50%',
             cd: 14000,
             cost: 150,
-            forward: 400,
+            forward: 260,
             magic: {
                 damage: 0,
                 range: 250
@@ -68,7 +68,7 @@ export default {
             description: '放置一个天平装置，持续 8 秒。自动称量周围 400 码内敌我双方的"总质量"（当前总血量）。若敌方总质量 > 我方，天平倾斜，对敌方造成每秒 50 点伤害；若我方占优，则为我方提供 10% 伤害加成',
             cd: 20000,
             cost: 200,
-            forward: 400,
+            forward: 260,
             magic: {
                 damage: 50,
                 range: 400
