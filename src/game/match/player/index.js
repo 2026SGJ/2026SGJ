@@ -47,15 +47,15 @@ const clamp01 = (v) => {
  *   三端共用一套按键状态（effectiveKeys = 键盘 heldKeys ∪ 手柄 _gamepadKeys ∪ 触屏 _touchKeys），
  *   可同时混用；右摇杆 / 瞄准摇杆 / 世界坐标点击提供瞄准方向（aimDir），影响道具发射方向。
  * 
- * 商店交互（重构后 — isFixed 屏幕实体 GUI）：
- * 1. 每 tick 检查是否靠近商店实体（60px）
- * 2. 玩家按 E 键时切换商店开关（E 边沿触发打开/关闭，优先级最高）
- * 3. 商店打开后禁止移动/攻击/采矿，输入重定向到 GUI：
- *      - 鼠标 / 触屏屏幕坐标点击商品 → 购买（C2SMouseEvent / C2STouch）
- *      - 手柄右摇杆移动选中光标，A 键购买选中商品（映射 KeyR）
- *      - E 键 / B 键 / 点击关闭按钮 → 关闭商店
- * 4. 离开商店范围时自动关闭商店
- * 5. 商店界面本身由 isFixed 实体经 S2CRender 渲染（见 ShopGui）
+ * 商店交互（重构后 — 独立协议包，与渲染管线解耦）：
+ * 1. 每 tick 检查是否靠近商店实体（50px），设置 canShop / shopTarget（供客户端提示）
+ * 2. 商店的打开 / 关闭 / 购买由客户端通过专用数据包驱动：
+ *      - C2SOpenShop  （E 键按下）→ 服务端校验后回 S2COpenShop + S2CShopList
+ *      - C2SCloseShop  （E 键 / 关闭按钮）→ 服务端回 S2CCloseShop
+ *      - C2SBuyItem    （点击商品 / 手柄 A）→ 服务端回 S2CBuyItem
+ * 3. 商店打开期间服务端禁止移动 / 攻击 / 采矿（isShopOpen 锁定）
+ * 4. 离开商店范围 / 死亡时服务端自动关闭并推送 S2CCloseShop
+ * 5. 服务端不再渲染任何商店界面（见 ShopSession / src/network/shop.js）
  * 
  * 开采机制：
  * 1. 每 tick 检查是否靠近矿物（30px），若靠近则设置 canMine 标志
@@ -122,7 +122,10 @@ class Player {
         // ---------- 商店交互相关 ----------
         /** @type {boolean} 玩家附近是否存在可交互的商店实体 */
         this.canShop = false;
-        /** @type {boolean} 当前 tick 是否刚刚切换为打开商店（Game 层据此创建 ShopGui） */
+        /**
+         * @type {boolean} 商店刚打开标记（BotController 使用，仅供行为树状态；
+         * 真人玩家的打开 / 关闭由 C2SOpenShop / C2SCloseShop 独立协议包驱动）
+         */
         this.shopJustOpened = false;
         /** @type {boolean} 玩家是否正在浏览商店（打开商店后禁止移动，类似开采状态） */
         this.isShopOpen = false;
@@ -143,16 +146,12 @@ class Player {
         this.spawnOutpostTarget = null;
         // ---------- 前哨站重生点相关 ----------
 
-        // ---------- 商店 GUI（isFixed 屏幕实体）相关 ----------
-        /** @type {import('../gui/shopGui.js').default|null} 当前打开的商店界面（null = 未打开） */
-        this._gui = null;
+        // ---------- 商店会话（独立协议包，与渲染管线解耦）----------
         /** @type {import('../entity/shop.js').default|null} 当前打开的商店实体 */
         this._openShop = null;
-        /** @type {{x:number,y:number}|null} 待处理的屏幕坐标点击（鼠标 / 触屏，交给 GUI 命中检测） */
-        this._pendingShopClick = null;
-        /** @type {boolean} 手柄 A 键已按下（购买当前选中商品，由 Game 层消费） */
-        this._pendingShopBuySelected = false;
-        // ---------- 商店 GUI 相关 ----------
+        /** @type {import('../shop/ShopSession.js').default|null} 当前打开的商店会话（null = 未打开） */
+        this._shopSession = null;
+        // ---------- 商店会话 ----------
 
         this.animateState = 'idle';
         this.eventHandlers = {};
@@ -637,17 +636,10 @@ class Player {
             this._gamepadKeys.add(ly < 0 ? 'KeyW' : 'KeyS');
         }
 
-        // ---- 右摇杆：商店 GUI 打开时控制商品选中，否则瞄准 ----
+        // ---- 右摇杆 → 瞄准方向 ----
+        // （商店界面的商品选中由客户端本地处理，不再占用服务端输入通道）
         if (Math.abs(rx) > dz || Math.abs(ry) > dz) {
-            if (this._gui) {
-                // 商店界面：右摇杆移动选中光标（带死区 + 累积阈值防抖）
-                this._gui.handleStick(rx, ry);
-            } else {
-                this._setAim(rx, ry);
-            }
-        } else if (this._gui) {
-            // 摇杆回中：衰减残留位移累积，防止下次推动时误跳格
-            this._gui.decayStick();
+            this._setAim(rx, ry);
         }
 
         // ---- ABXY ----
@@ -778,17 +770,10 @@ class Player {
             return;
         }
 
-        // ---- 商店界面打开：输入重定向（禁止攻击/技能/采矿） ----
-        if (this.isShopOpen && this._gui) {
-            // A 键（手柄 A / 键盘映射 KeyR）购买当前选中商品（边沿触发）
-            if (key.includes('KeyR') && !prevKey.includes('KeyR')) {
-                this._pendingShopBuySelected = true;
-            }
-            // E 键 / 手柄 B 键（映射 KeyE）关闭商店（边沿触发）
-            if (key.includes('KeyE') && !prevKey.includes('KeyE')) {
-                this.isShopOpen = false;
-                this.shopJustOpened = false;
-            }
+        // ---- 商店界面打开：禁止移动/攻击/技能/采矿 ----
+        // （打开/关闭/购买均由客户端通过 C2SOpenShop / C2SCloseShop / C2SBuyItem
+        //  独立协议包驱动，服务端不再在按键层处理商店 UI）
+        if (this.isShopOpen) {
             this.prevHeldKeys = [...key];
             return;
         }
@@ -866,21 +851,12 @@ class Player {
                 case 'KeyE':
                     // 匹配阶段禁止商店/采矿/重生点交互
                     if (!canAct) break;
-                    // 边沿触发（首次按下）：商店切换开关（优先级最高）
+                    // 边沿触发（首次按下）：
+                    //  - 商店的打开 / 关闭由客户端发送 C2SOpenShop / C2SCloseShop
+                    //    独立协议包驱动（服务端不再在按键层切换商店开关）
+                    //  - 前哨站 — 靠近己方占领的前哨站 25px 内按 E 设置重生点
                     if (key.includes('KeyE') && !prevKey.includes('KeyE')) {
-                        if (this.canShop && this.shopTarget) {
-                            // 商店打开中 → 关闭；未打开 → 打开（Game 层据此创建 ShopGui）
-                            if (this.isShopOpen) {
-                                this.isShopOpen = false;
-                                this.shopJustOpened = false;
-                            } else {
-                                this.isShopOpen = true;
-                                this.shopJustOpened = true;
-                                this._openShop = this.shopTarget;
-                            }
-                        }
-                        // 优先级2：前哨站 — 靠近己方占领的前哨站 25px 内按 E 设置重生点
-                        else if (this.canSetSpawn && this.spawnOutpostTarget) {
+                        if (this.canSetSpawn && this.spawnOutpostTarget) {
                             this.spawnOutpostTarget.setSpawn(this);
                         }
                     }
@@ -1011,7 +987,7 @@ class Player {
      * 更新商店接近检测
      *
      * 检查玩家是否在商店实体的交互范围内。
-     * 若离开范围则自动关闭商店（Game 层据此销毁 ShopGui）。
+     * 若离开范围则自动关闭商店（Game 层据此补发 S2CCloseShop）。
      *
      * @param {import('../world.js').default} world - 世界实例
      */
@@ -1128,27 +1104,6 @@ class Player {
             this.miningTime = 0;
             this.canMine = false;
             this.miningTarget = null;
-        }
-    }
-
-    /**
-     * 处理屏幕坐标点击（商店 GUI 命中检测）
-     *
-     * 鼠标（C2SMouseEvent）与触屏（C2STouch world:false）的屏幕坐标点击
-     * 统一经 lastClick 汇聚；商店 GUI 打开时，屏幕坐标点击转为待购买意图
-     * （_pendingShopClick），由 Game._syncShopGui 完成命中检测与购买。
-     * 消费后清空 lastClick 与触屏缓存，避免同一点击重复触发。
-     */
-    processGuiClick() {
-        if (!this._gui) return;
-        if (this.lastClick && !this.lastClick.world) {
-            this._pendingShopClick = {
-                x: this.lastClick.x,
-                y: this.lastClick.y,
-            };
-            this.lastClick = null;
-            // 触屏点击是持续性状态（每 tick 重读），消费后必须清空
-            if (this._touchState) this._touchState.click = null;
         }
     }
 
@@ -1539,8 +1494,6 @@ class Player {
         this.updateOutpostProximity(world);
         this.processKeyholding();
         this.processMining();
-        // 屏幕坐标点击（鼠标 / 触屏）→ 商店 GUI 命中检测意图
-        this.processGuiClick();
         this.move(world);
         this.processSkills(players);
         this.processBuffs();
@@ -1706,11 +1659,9 @@ class Player {
             this.cantAttack = false;
             this.damageReduction = 0;
             this._popTextLastSent = {};
-            // 死亡时强制关闭商店（Game._syncShopGui 会据此销毁 ShopGui）
+            // 死亡时强制关闭商店（Game._syncShopState 会据此补发 S2CCloseShop）
             this.isShopOpen = false;
             this.shopJustOpened = false;
-            this._pendingShopClick = null;
-            this._pendingShopBuySelected = false;
             if (this._openShop) {
                 this._openShop.openedBy.delete(this.sessionId);
                 this._openShop = null;
@@ -1756,7 +1707,7 @@ class Player {
         this.damageReduction = 0;
         // 清空伤害漂浮文字节流记录
         this._popTextLastSent = {};
-        // 重置商店状态（死亡时强制关闭商店）
+        // 重置商店状态（死亡时强制关闭商店，Game._syncShopState 会补发 S2CCloseShop）
         this.isShopOpen = false;
         this.shopJustOpened = false;
         this.canShop = false;
@@ -1764,9 +1715,6 @@ class Player {
         // 死亡不清空物品栏（保留道具）
         // 如果希望死亡掉落，可取消下面注释：
         // this.inventory.clear();
-        // 清理商店状态
-        this._pendingShopClick = null;
-        this._pendingShopBuySelected = false;
         if (this._openShop) {
             this._openShop.openedBy.delete(this.sessionId);
             this._openShop = null;

@@ -2,6 +2,45 @@
 
 本文档记录本次代码审阅与修复的变更内容，以及审阅中发现但暂未修改的问题（拿不准、交由后续确认）。
 
+## 商店与渲染管线分离（独立协议包）
+
+### 变更概述
+
+商店界面不再通过 S2CRender 的 isFixed GUI 实体（ShopGui）渲染，改为独立协议包通信，渲染管线中所有商店专用代码（isFixed GUI 实体机制）一并移除：
+
+- **新增 `src/network/shop.js`**：商店独立协议封装（`S2COpenShop` / `S2CShopList` / `S2CCloseShop` / `S2CBuyItem` 发送函数）。
+- **新增 `src/game/match/shop/ShopSession.js`**：每玩家商店会话状态机，取代 ShopGui：
+  - `open()` → `S2COpenShop`（成功含商店信息）+ `S2CShopList`（初始清单）
+  - `close(reason)` → `S2CCloseShop`（manual / out_of_range / dead / shop_disabled）
+  - `buy(itemId)` → `S2CBuyItem`（成功 / 失败原因），随后推送最新清单
+  - `tick()` → 商店换货 / 库存 / 金钱变化时自动推送最新 `S2CShopList`（JSON 指纹去重）
+- **`src/sessions/index.js`**：新增 `C2SOpenShop` / `C2SCloseShop` 消息路由。
+- **`src/game/index.js`**：
+  - `_syncShopGui` / `_openShopGui` / `_closeShopGui` / `_buyFeedback` 替换为协议驱动的 `_syncShopState` / `_handleOpenShopRequest` / `_handleCloseShopRequest` / `_handleShopBuy`；
+  - `C2SBuyItem` 路由：商店会话打开且商品属于该商店目录 → 商店实体购买；否则保留物品栏商店旧通道（人机 / 直接请求）；
+  - 渲染增量同步移除 isFixed GUI 相关字段与步骤（seenGui / seenGuiIds / pendingGuiRemovals 及 `_buildRenderPacket` 第 4、5 步、`_refreshRenderFingerprints` GUI 指纹）。
+- **`src/game/match/player/index.js`**：
+  - 移除服务端 E 键商店开关切换、`_pendingShopClick` / `_pendingShopBuySelected` / `processGuiClick` / `_gui` 引用；打开 / 关闭 / 购买改为客户端经独立协议包驱动；
+  - 保留 `isShopOpen` / `_openShop` 用于游戏逻辑（商店打开时禁止移动/攻击/采矿）；
+  - `shopJustOpened` 保留供 BotController 行为树使用。
+- **删除文件**：`src/game/match/gui/shopGui.js`、`src/game/match/entity/gui.js`。
+- **协议一览**（见 `src/network/shop.js` 头注释）：
+  - `C2SOpenShop`（客户端 → 服务端）请求打开商店
+  - `S2COpenShop`（服务端 → 客户端）打开结果（成功含商店信息 / 失败原因）
+  - `S2CShopList`（服务端 → 客户端）商品清单（常驻 + 刷新 + 玩家金钱）
+  - `C2SCloseShop`（客户端 → 服务端）请求关闭商店
+  - `S2CCloseShop`（服务端 → 客户端）关闭结果（手动 / 离开范围 / 死亡 / 阶段禁用）
+  - `C2SBuyItem`（客户端 → 服务端）购买请求（已有通道，复用）
+  - `S2CBuyItem`（服务端 → 客户端）购买结果（成功 / 失败原因）
+
+### 顺带修复：商店换货从未执行
+
+`Shop.tick()`（到点重新随机抽取刷新商品并补满库存，刷新周期 60s）此前没有任何调用方，导致刷新商品列表永不换货。已在 `World.tick()` 中补上对 `this.shops` 的逐商店 `shop.tick()` 调用（商店刷新列表变化会经 ShopSession 指纹比对推送最新 `S2CShopList`）。
+
+### 新增回归测试
+
+- `scripts/test_shop_session.js`：通过 ESM loader（`module.register` + data: URL stub）隔离网络层，验证 ShopSession 的打开 / 购买 / 失败 / 关闭 / 换货推送 / 指纹去重 / dispose 幂等，共 28 项断言。运行：`node scripts/test_shop_session.js`。
+
 ## 修复的 Bug
 
 ### 1. 主循环首个 tick 崩溃（进程直接退出）— `src/game/index.js`
