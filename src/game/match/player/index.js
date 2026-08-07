@@ -280,6 +280,33 @@ class Player {
 		this._reboundPercent = 0; // 反弹比例（被 ReboundBuff 修改）
 		// ---------- Buff 叠加属性 ----------
 
+		// ---------- 区域效果（AreaManager 维护，随进出区块附加/清除） ----------
+		/**
+		 * 当前所在区块索引（row * cols + col；-1 = 尚未判定 / 地图外）。
+		 * 由 AreaManager.tick 每 tick 比对坐标得出，区块变化时切换效果。
+		 * @type {number}
+		 */
+		this._areaIndex = -1;
+		/**
+		 * 当前生效的区域效果列表（{ id, name, description, asset, kind, effects }）。
+		 * 随进入/离开区块更新，经 remoteData().state.areas 发送给客户端渲染展示。
+		 * @type {Array<Object>}
+		 */
+		this._currentAreas = [];
+		/**
+		 * 区域移速倍率（1 = 无效果；由当前区块 effects.speed 决定，离开重置）。
+		 * 在 move() 中与 buff 移速倍率相乘。
+		 * @type {number}
+		 */
+		this._areaSpeedMult = 1;
+		/**
+		 * 区域伤害倍率（1 = 无效果；由当前区块 effects.damage 决定，离开重置）。
+		 * 在 takeDamage 攻击者侧挂钩，普攻/技能/道具/机器人攻击全部生效。
+		 * @type {number}
+		 */
+		this._areaDmgMult = 1;
+		// ---------- 区域效果 ----------
+
 		// ---------- 渲染增量同步（带宽优化） ----------
 		/**
 		 * 最近一次渲染数据的 JSON 指纹（由 Game 主循环每 tick 刷新比对），
@@ -1235,8 +1262,11 @@ class Player {
 			return;
 		}
 
-		// 计算最终速度倍率：SpeedBuff 乘数 × (1 - 烟雾减速)
-		const speedMult = this.speedMultiplier * (1 - (this.slowAmount || 0));
+		// 计算最终速度倍率：SpeedBuff 乘数 × (1 - 烟雾减速) × 区域效果倍率
+		const speedMult =
+			this.speedMultiplier *
+			(1 - (this.slowAmount || 0)) *
+			(this._areaSpeedMult || 1);
 
 		const kb = this.knockback.lengthSq();
 		if (this.dx && kb <= 16)
@@ -1622,6 +1652,8 @@ class Player {
 					level: b.level,
 					remaining: b.getRemainingTime(),
 				})),
+				// 当前生效的区域效果（随进出区块实时更新，供客户端渲染展示）
+				areas: this._currentAreas || [],
 				// 新增道具/物品栏相关状态
 				inventory: this.inventory ? this.inventory.serialize() : [],
 				shield: this.shield || 0,
@@ -1732,6 +1764,11 @@ class Player {
 			Math.random() < attacker._critChance
 		) {
 			finalAmount = Math.round(finalAmount * (attacker._critDamage || 2));
+		}
+
+		// ----- 区域效果：攻击者所在区块的伤害倍率（如力量回廊 +20%） -----
+		if (attacker && attacker._areaDmgMult && attacker._areaDmgMult !== 1) {
+			finalAmount = Math.round(finalAmount * attacker._areaDmgMult);
 		}
 
 		// ----- 护盾吸收 -----

@@ -6,6 +6,7 @@ import World from "./match/world.js";
 import room from "../network/index.js";
 import MatchManager from "./match/manager.js";
 import RobotManager from "./match/robot/RobotManager.js";
+import AreaManager from "./match/area/AreaManager.js";
 import { isRobotType } from "../assets/data/robots/robots.js";
 import ROBOT_TYPES from "../assets/data/robots/robots.js";
 import { render } from "./render.js";
@@ -69,6 +70,12 @@ class Game {
 		 */
 		this.robotManager = new RobotManager(this);
 		/**
+		 * 区域效果管理器（地图划分为 640×360 区块，进出区块附加/清除效果）
+		 * 玩家 / 人机 / AI 机器人统一结算，当前效果经 remoteData.state.areas 推送客户端
+		 * @type {AreaManager}
+		 */
+		this.areaManager = new AreaManager(this);
+		/**
 		 * 各玩家渲染增量同步状态：sessionId → { lastSentTick, seenEntities, seenIds, seenPlayers, lastPopTextSeq }
 		 * - lastSentTick  上次发送渲染包时的全局渲染 tick（world.renderTick）
 		 * - lastFullSyncTick 上次「全量重同步」时的渲染 tick（周期全量重推，防初始推送丢失）
@@ -92,10 +99,12 @@ class Game {
 		// 初始化游戏
 		console.log("游戏初始化");
 		this.world = new World({ map_id: "1" });
+		// 生成区域区块实体并注册到世界渲染列表（需在世界创建完成后调用）
+		this.areaManager.init();
 		Shop.resetStock(); // 重置商店库存
 		// 主循环：每 tick 更新玩家和世界，随后同步商店会话（独立协议包）
 		this.matchLoop = setInterval(() => {
-			matchLoop(this.players, this.world, this.robotManager);
+			matchLoop(this.players, this.world, this.robotManager, this.areaManager);
 			// 对局匹配 / 阶段 / 胜负判定管理（匹配广播、人机补位、基地伤害、死绝判负等）
 			this.match.tick();
 			// 同步所有玩家的物品栏（仅在变动时发送）
