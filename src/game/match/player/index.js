@@ -148,6 +148,8 @@ class Player {
 		// ---------- 商店交互相关 ----------
 		/** @type {boolean} 玩家附近是否存在可交互的商店实体 */
 		this.canShop = false;
+		/** @type {boolean} 周围 50px 内是否存在商店（可打开商店） */
+		this.canOpenShop = false;
 		/**
 		 * @type {boolean} 商店刚打开标记（BotController 使用，仅供行为树状态；
 		 * 真人玩家的打开 / 关闭由 C2SOpenShop / C2SCloseShop 独立协议包驱动）
@@ -1094,6 +1096,16 @@ class Player {
 	updateShopProximity(world) {
 		const nearbyShop = world.getNearbyShop(this.x, this.y);
 
+		// canOpenShop：周围 50px 内是否存在商店（用商店自身交互半径 SHOP_META.radius 判定）
+		// 与 canShop（60px 接近提示）不同，此为「可打开商店」的精确判定
+		this.canOpenShop = false;
+		for (const shop of world.shops) {
+			if (shop.isPlayerNear(this.x, this.y)) {
+				this.canOpenShop = true;
+				break;
+			}
+		}
+
 		if (nearbyShop) {
 			this.canShop = true;
 			this.shopTarget = nearbyShop;
@@ -1565,6 +1577,8 @@ class Player {
 				canMine: this.canMine,
 				/** 玩家是否在可交互商店附近 */
 				canShop: this.canShop,
+				/** 周围 50px 内是否有商店（可打开商店，true/false） */
+				canOpenShop: this.canOpenShop,
 				/** 玩家是否已打开商店 UI */
 				isShopOpen: this.isShopOpen,
 				/** 玩家附近是否有可设置重生点的前哨站（25px 内 + 己方占领） */
@@ -1905,6 +1919,7 @@ class Player {
 		this.isShopOpen = false;
 		this.shopJustOpened = false;
 		this.canShop = false;
+		this.canOpenShop = false;
 		this.shopTarget = null;
 		// 死亡不清空物品栏（保留道具）
 		// 如果希望死亡掉落，可取消下面注释：
