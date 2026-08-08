@@ -96,6 +96,8 @@ export default class BotPlayer extends Player {
 		this.move(world);
 
 		// ---- 5. 技能处理（普攻 + 技能释放；目标含敌方 AI 机器人） ----
+		// 自动索敌：每 tick 选取攻击范围内最优敌方单位（与真人玩家一致）
+		this.autoTarget = this.findTarget(players, robots);
 		this.processSkills(players, robots);
 
 		// ---- 6. Buff 处理（叠加/过期/效果） ----

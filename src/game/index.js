@@ -17,6 +17,7 @@ import { buildPopTextEntries, prunePopTexts } from "./popText.js";
 import { pushChat, flushChat } from "./chat.js";
 import { isHeroUnlocked } from "../backend.js";
 import { HERO_IDS } from "../assets/data/heros/index.js";
+import { getLazyLoadAssets } from "../assets/lazyload/index.js";
 
 /**
  * 世界实体全量重同步周期（tick 数）
@@ -56,6 +57,17 @@ class Game {
 		 * @type {Object<string, {sessionId: string, joinedAt: number}>}
 		 */
 		this.spectators = {};
+		/**
+		 * 旁观者幽灵玩家：sessionId → Player 实例（仅在该旁观者自己的视角中渲染）
+		 *
+		 * 对局已开始后加入的旁观者会获得一份独立的 Player 对象：
+		 *   - 不进入 players（不被任何人渲染，不参与战斗 / 匹配 / 结算 / 商店）
+		 *   - asset 恒为 "none"（tick 内由 isSpectator 强制），可 WASD 自由移动
+		 *   - 出生在地图正中心（world.mapSize 的一半）
+		 *   - 仅在 _buildRenderPacket 中追加进该旁观者本人的渲染包
+		 * @type {Object<string, import('./match/player/index.js').default>}
+		 */
+		this.spectatorPlayers = {};
 		this.world = null;
 		/** @type {number} Bot 编号计数器 */
 		this.botCounter = 0;
@@ -107,6 +119,10 @@ class Game {
 		// 主循环：每 tick 更新玩家和世界，随后同步商店会话（独立协议包）
 		this.matchLoop = setInterval(() => {
 			matchLoop(this.players, this.world, this.robotManager, this.areaManager);
+			// 旁观者幽灵玩家 tick（仅 WASD 移动，无战斗；不进入 players）
+			for (const sp of Object.values(this.spectatorPlayers)) {
+				sp.tick(this.players, this.world, null);
+			}
 			// 对局匹配 / 阶段 / 胜负判定管理（匹配广播、人机补位、基地伤害、死绝判负等）
 			this.match.tick();
 			// 同步所有玩家的物品栏（仅在变动时发送）
@@ -137,6 +153,26 @@ class Game {
 							sessionId,
 							joinedAt: Date.now(),
 						};
+						// ---------- 旁观者幽灵玩家（仅自己视角可见，asset 为 none） ----------
+						// 创建一份独立 Player 实例，仅在本旁观者自己的渲染包中发送：
+						//  - 不进入 players：不被任何人渲染，不参与战斗 / 匹配 / 结算 / 商店
+						//  - asset 恒为 "none"（tick 内由 isSpectator 强制），可 WASD 自由移动
+						//  - 出生在地图正中心
+						const ghost = new Player(sessionId, {
+							name: name || "旁观者",
+							hero: "newton", // 仅用于填充数值，渲染 asset 与 hero 无关
+							team: "A",
+						});
+						ghost.isSpectator = true;
+						ghost.canAct = false; // 旁观者禁止攻击 / 采矿 / 技能 / 商店
+						ghost.x = Math.round(this.world.mapSize.width / 2);
+						ghost.y = Math.round(this.world.mapSize.height / 2);
+						ghost.hitbox.x = ghost.x - 25;
+						ghost.hitbox.y = ghost.y - 25;
+						ghost.costume = "none";
+						this.spectatorPlayers[sessionId] = ghost;
+						// 懒加载资源清单（旁观者同样渲染世界，需要相同的资源 URL）
+						this._sendLazyLoadAssets(sessionId);
 						// 初始化渲染增量同步状态（首次渲染全量发送，之后增量）
 						// 注意：字段必须与普通玩家保持一致（周期全量重同步游标 / 漂浮文字
 						// 投递游标），否则 _buildRenderPacket 会因缺失字段而崩溃
@@ -163,7 +199,7 @@ class Game {
 								data: {
 									type: "spectator_joined",
 									phase: this.match.phase,
-									text: "[旁观] 对局已开始，你以旁观者身份加入（仅可观看，不可操作）。",
+									text: "[旁观] 对局已开始，你以旁观者身份加入（可 WASD 自由移动观察，不可战斗）。",
 								},
 							}),
 						);
@@ -278,6 +314,8 @@ class Game {
 
 					// 通知匹配管理器：真人加入（匹配阶段禁止行动、踢人机、调整倒计时）
 					this.match.onHumanJoined(sessionId);
+					// 懒加载资源清单（S2CUpdateAssets，每个条目一个包）
+					this._sendLazyLoadAssets(sessionId);
 					return true;
 				} catch (_) {
 					console.error(_);
@@ -292,6 +330,8 @@ class Game {
 			// 无需通知他人隐藏——旁观者本就不被任何人渲染）
 			if (this.spectators[sessionId]) {
 				delete this.spectators[sessionId];
+				// 清理旁观者幽灵玩家（其渲染包只发给自己，断开即无引用）
+				delete this.spectatorPlayers[sessionId];
 				delete this._renderStates[sessionId];
 				console.log(`Spectator removed: sessionId=${sessionId}, uuid=${uuid}`);
 				return;
@@ -325,10 +365,27 @@ class Game {
 
 		// 键盘事件
 		playerEvent.on("keyboardEvent", ({ sessionId, uuid, event }) => {
-			const player = this.players[sessionId];
+			// 旁观者幽灵玩家同样接收键盘输入（WASD 移动观察）
+			const player = this.players[sessionId] || this.spectatorPlayers[sessionId];
 			if (!player) return;
 			try {
 				player.trigger("keyboardEvent", JSON.parse(event).data);
+			} catch (_) {}
+		});
+
+		// ============================================================
+		//  C2SSwitchSkills — 切换当前选中技能（客户端直选，id: 1~4）
+		//  已取消 C 键轮换：客户端显式指定目标技能槽位
+		// ============================================================
+		playerEvent.on("switchSkills", ({ sessionId, uuid, event }) => {
+			const player = this.players[sessionId];
+			if (!player) return;
+			try {
+				const msg = typeof event === "string" ? JSON.parse(event) : event;
+				const data = msg && msg.data !== undefined ? msg.data : msg;
+				const id = data && data.id;
+				if (id == null) return;
+				player.switchSkill(id);
 			} catch (_) {}
 		});
 
@@ -377,7 +434,7 @@ class Game {
 
 		// 游戏手柄事件（C2SGamepad / C2SGamepadEvent）
 		playerEvent.on("gamepadEvent", ({ sessionId, uuid, event }) => {
-			const player = this.players[sessionId];
+			const player = this.players[sessionId] || this.spectatorPlayers[sessionId];
 			if (!player) return;
 			try {
 				const msg = typeof event === "string" ? JSON.parse(event) : event;
@@ -390,7 +447,7 @@ class Game {
 
 		// 移动端触屏事件（C2STouch / C2STouchEvent）
 		playerEvent.on("touchEvent", ({ sessionId, uuid, event }) => {
-			const player = this.players[sessionId];
+			const player = this.players[sessionId] || this.spectatorPlayers[sessionId];
 			if (!player) return;
 			try {
 				const msg = typeof event === "string" ? JSON.parse(event) : event;
@@ -403,7 +460,7 @@ class Game {
 
 		// 鼠标事件（C2SMouseEvent）— 商店 GUI 点击购买 / 世界坐标点击瞄准
 		playerEvent.on("mouseEvent", ({ sessionId, uuid, event }) => {
-			const player = this.players[sessionId];
+			const player = this.players[sessionId] || this.spectatorPlayers[sessionId];
 			if (!player) return;
 			try {
 				const msg = typeof event === "string" ? JSON.parse(event) : event;
@@ -594,6 +651,16 @@ class Game {
 				p._lastRenderData = data;
 			}
 		}
+		// 3) 旁观者幽灵玩家指纹（仅在自己的渲染包中发送，独立参与增量同步）
+		for (const sp of Object.values(this.spectatorPlayers)) {
+			const data = sp.remoteData();
+			const fp = JSON.stringify(data);
+			if (fp !== sp._renderFingerprint) {
+				sp._renderFingerprint = fp;
+				sp._lastChangeTick = renderTick;
+				sp._lastRenderData = data;
+			}
+		}
 	}
 
 	/**
@@ -687,6 +754,22 @@ class Game {
 			} else {
 				state.seenPlayers.add(pid);
 				packet.push(p.remoteData());
+			}
+		}
+
+		// ---- 3.5 旁观者幽灵玩家：仅出现在该旁观者自己的视角中 ----
+		// 旁观者不进入 players，因此不会被任何其他玩家渲染；
+		// 这里把自己的幽灵玩家（asset 为 none）追加进本人的渲染包，
+		// 增量规则与普通玩家一致（首次全量 + 之后仅发送变化的）。
+		const ghost = this.spectatorPlayers[sessionId];
+		if (ghost) {
+			if (state.seenPlayers.has(ghost.sessionId)) {
+				if (ghost._lastChangeTick > lastSentTick) {
+					packet.push(ghost.remoteData());
+				}
+			} else {
+				state.seenPlayers.add(ghost.sessionId);
+				packet.push(ghost.remoteData());
 			}
 		}
 
@@ -851,6 +934,27 @@ class Game {
 			}
 		}
 		return nearest;
+	}
+
+	/**
+	 * 向指定会话发送懒加载资源清单（S2CUpdateAssets，每个条目一个包）
+	 *
+	 * 数据包格式：{ dest: sessionId, seq: 0, data: { asset, url } }
+	 * data 字段原样传入 lazyload.json 中带有 asset / url 字段的对象。
+	 *
+	 * @param {string} sessionId - 目标会话（玩家或旁观者）
+	 */
+	_sendLazyLoadAssets(sessionId) {
+		for (const entry of getLazyLoadAssets()) {
+			room.send(
+				"S2CUpdateAssets",
+				JSON.stringify({
+					dest: sessionId,
+					seq: 0,
+					data: { asset: entry.asset, url: entry.url },
+				}),
+			);
+		}
 	}
 
 	end() {

@@ -57,8 +57,11 @@ const deepCloneHeroData = (data, heroId) => {
  *   WASD    — 移动
  *   R       — 普攻（basic attack）
  *   F       — 释放当前选中的技能
- *   C       — 切换选中技能（循环 skill1 ~ skill4）
  *   E       — 靠近商店时打开商店（优先级最高）；否则靠近矿物时开采
+ *
+ * 技能切换（不再使用 C 键轮换）：
+ *   客户端通过 C2SSwitchSkills 包显式指定目标技能槽位（id: 1~4），
+ *   服务端据此直接设置 selectedSkill（见 switchSkill()）
  *
  * 三端操作支持：
  *   - 键盘：C2SKeyboardEvent（KeyHolding / KeyDown / KeyUp）
@@ -203,7 +206,7 @@ class Player {
 		this.heldKeys = [];
 		/** @type {string[]} 三端合并后的有效按键列表（键盘 + 手柄 + 触屏），由 mergeInputKeys 生成，供 processKeyholding 消费 */
 		this.effectiveKeys = [];
-		/** @type {string[]} 上一帧的按键列表，用于检测按键增量（KeyC 切换技能等单次触发操作） */
+		/** @type {string[]} 上一帧的按键列表，用于检测按键增量（道具快捷键等单次触发操作） */
 		this.prevHeldKeys = [];
 
 		this.args = deepCloneHeroData(HERODATAS[this.hero], this.hero);
@@ -217,6 +220,13 @@ class Player {
 		this.traitManager = null;
 		/** 普攻/技能目标判定距离（词条可扩展，默认 75px） */
 		this.attackRange = 75;
+		/**
+		 * 自动索敌选中的敌方单位（敌方玩家或敌方 AI 机器人；无目标为 null）
+		 * 每 tick 由 findTarget 选取，经 remoteData().state.autoTargetId 发送客户端
+		 * （旁观者幽灵玩家不参与战斗，恒为 null）
+		 * @type {import('../player/index.js').default|import('../robot/RobotEntity.js').default|null}
+		 */
+		this.autoTarget = null;
 		// ---------- 词条系统 ----------
 
 		// ---------- 对局状态（由 MatchManager 管理） ----------
@@ -619,8 +629,9 @@ class Player {
 	 *      virtual: true,
 	 *      type: 'joystick' | 'button',
 	 *      control: 'move' | 'aim'                        // joystick
-	 *             | 'attack' | 'skill' | 'interact' | 'switchSkill'
+	 *             | 'attack' | 'skill' | 'interact'
 	 *             | 'useItem' | 'item1'..'item10'         // button
+	 *      （技能切换不再经虚拟按键：客户端发 C2SSwitchSkills 包直选，id: 1~4）
 	 *      x, y,        // joystick 方向 (-1~1)
 	 *      pressed: true|false
 	 *    }
@@ -768,8 +779,8 @@ class Player {
 	 *   右摇杆   → 瞄准方向（影响道具投射物发射方向）
 	 *   A        → 普攻（KeyR）
 	 *   X        → 释放技能（KeyF）
-	 *   Y        → 切换技能（KeyC）
 	 *   B        → 交互（KeyE：商店/开采/设置重生点）
+	 *   技能切换不占用手柄按键：客户端经 C2SSwitchSkills 包直选（id: 1~4）
 	 *   RT（扳机）→ 普攻（KeyR）
 	 *   LT（扳机）→ 使用 1 号位道具（Digit1）
 	 */
@@ -800,7 +811,6 @@ class Player {
 		// ---- ABXY ----
 		if (B.a) this._gamepadKeys.add("KeyR");
 		if (B.x) this._gamepadKeys.add("KeyF");
-		if (B.y) this._gamepadKeys.add("KeyC");
 		if (B.b) this._gamepadKeys.add("KeyE");
 
 		// ---- 扳机 ----
@@ -819,8 +829,8 @@ class Player {
 	 *     attack      → 普攻（KeyR）
 	 *     skill       → 释放技能（KeyF）
 	 *     interact    → 交互（KeyE：商店/开采/设置重生点）
-	 *     switchSkill → 切换技能（KeyC）
 	 *     useItem     → 使用 1 号位道具（Digit1）
+	 *   技能切换不占虚拟按键：客户端经 C2SSwitchSkills 包直选（id: 1~4）
 	 *     item1~item10→ 使用对应槽位道具（Digit1~Digit0）
 	 *   点击坐标（world=true）→ 玩家朝向点击点（瞄准方向）
 	 */
@@ -847,7 +857,6 @@ class Player {
 			attack: "KeyR",
 			skill: "KeyF",
 			interact: "KeyE",
-			switchSkill: "KeyC",
 			useItem: "Digit1",
 		};
 		for (const [ctrl, key] of Object.entries(BTN_MAP)) {
@@ -934,19 +943,7 @@ class Player {
 		}
 
 		// ---- 单次触发的按键（仅在首次按下时触发） ----
-		// C 键：切换技能（仅在新按下时触发，防止每 tick 反复切换）
-		if (key.includes("KeyC") && !prevKey.includes("KeyC")) {
-			const available = this.getAvailableSkills();
-			if (available.length > 0) {
-				const currentIdx = available.indexOf(this.selectedSkill);
-				const nextIdx = (currentIdx + 1) % available.length;
-				this.selectedSkill = available[nextIdx];
-				console.log(
-					`[Skill] ${this.sessionId} switched to skill ${this.selectedSkill} ` +
-						`(${this.getSkillData(this.selectedSkill)?.name || "unknown"})`,
-				);
-			}
-		}
+		// 技能切换不再占用按键：客户端经 C2SSwitchSkills 包直选（id: 1~4）
 
 		// ---- 道具快捷键（数字键 1-0 对应物品栏 1-10 号位） ----
 		// 匹配阶段禁止使用道具
@@ -1079,6 +1076,24 @@ class Player {
 			}
 		}
 		return skills;
+	}
+
+	/**
+	 * 切换当前选中的技能（由客户端 C2SSwitchSkills 包驱动，id: 1~4）
+	 * 替代旧的 C 键轮换：客户端显式指定目标技能槽位，服务端直接设置
+	 * @param {number} skillIndex - 1~4
+	 * @returns {boolean} 切换是否成功（id 非法或技能不存在时返回 false）
+	 */
+	switchSkill(skillIndex) {
+		const id = Number(skillIndex);
+		if (!Number.isInteger(id) || id < 1 || id > 4) return false;
+		if (!this.args.attacks[`skill${id}`]) return false;
+		this.selectedSkill = id;
+		console.log(
+			`[Skill] ${this.sessionId} switched to skill ${id} ` +
+				`(${this.getSkillData(id)?.name || "unknown"})`,
+		);
+		return true;
 	}
 
 	/**
@@ -1462,7 +1477,7 @@ class Player {
 			// 普攻出手：短暂展示收招动画（attack_end）过渡回 idle/run
 			this.attackEndUntil = Date.now() + Player.ATTACK_END_MS;
 
-			const target = this.findTarget(players, robots);
+			const target = this.autoTarget || this.findTarget(players, robots);
 			if (target) {
 				const damage =
 					this.args.attacks.basic.damage * this._strengthMultiplier;
@@ -1508,7 +1523,7 @@ class Player {
 
 			if (!skillInstance || !skillData) return;
 
-			const target = this.findTarget(players, robots);
+			const target = this.autoTarget || this.findTarget(players, robots);
 
 			// 对主目标施加技能效果
 			if (target) {
@@ -1679,6 +1694,10 @@ class Player {
 				// 玩家选择的 AI 机器人兵种与机器人渲染 id（客户端可据此展示/关联机器人）
 				robotType: this.robotType || null,
 				robotId: this.robotType ? `robot_${this.sessionId}` : null,
+				// 自动索敌选择的敌方单位 id（敌方玩家 sessionId / 敌方 AI 机器人 id；无目标为 null）
+				autoTargetId: this.autoTarget
+					? this.autoTarget.sessionId || this.autoTarget.id || null
+					: null,
 				// 三端输入状态（客户端可据此切换操作提示 UI）
 				inputMode: this.inputMode,
 				aiming: this._aimUntil > Date.now(),
@@ -1770,10 +1789,18 @@ class Player {
 		this.processKeyholding();
 		this.processMining();
 		this.move(world);
+		// 自动索敌：每 tick 选取攻击范围内最优敌方单位（供客户端展示索敌目标）
+		// 旁观者幽灵玩家不参与战斗，恒为 null
+		this.autoTarget = this.isSpectator
+			? null
+			: this.findTarget(players, robots);
 		this.processSkills(players, robots);
 		this.processBuffs();
 		this.processTeleportChannel(); // 回城卷轴引导
-		this.costume = `${this.hero}_${this.animate()}`;
+		// 旁观者幽灵玩家：渲染 asset 恒为 "none"（客户端据此不绘制模型）
+		this.costume = this.isSpectator
+			? "none"
+			: `${this.hero}_${this.animate()}`;
 	}
 
 	/**
