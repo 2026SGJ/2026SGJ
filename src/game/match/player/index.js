@@ -91,6 +91,12 @@ class Player {
 		this.sessionId = sessionId;
 		/** @type {string} 玩家显示名（真人来自握手数据 name，人机在 addBot 时指定） */
 		this.name = data.name || "";
+		/**
+		 * 玩家账号 uuid（来自握手数据，Game 层在创建前写入 data.uuid）
+		 * 对局结算时按 uuid 将战绩推入 backend；人机无账号，为 null
+		 * @type {string|null}
+		 */
+		this.uuid = data.uuid || null;
 		/** @type {'A'|'B'} 玩家所属队伍 */
 		this.team = data.team || "A";
 		// 队伍 A 出生点：底部基地 (1280, 6840)

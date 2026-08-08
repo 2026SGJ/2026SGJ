@@ -15,6 +15,8 @@ import ShopSession from "./match/shop/ShopSession.js";
 import { sendOpenShop, sendBuyItem } from "../network/shop.js";
 import { buildPopTextEntries, prunePopTexts } from "./popText.js";
 import { pushChat, flushChat } from "./chat.js";
+import { isHeroUnlocked } from "../backend.js";
+import { HERO_IDS } from "../assets/data/heros/index.js";
 
 /**
  * 世界实体全量重同步周期（tick 数）
@@ -125,7 +127,7 @@ class Game {
 
 		playerEvent.on(
 			"beforeNewPlayerAdded",
-			({ sessionId, uuid, name, event }) => {
+			async ({ sessionId, uuid, name, event }) => {
 				try {
 					// ---------- 非匹配阶段：以旁观者身份加入 ----------
 					// 对局已开始后，新玩家不再被拒绝加入，而是成为旁观者：
@@ -178,6 +180,45 @@ class Game {
 					}
 
 					const data = JSON.parse(event).data;
+
+					// ---------- 英雄选择与解锁校验 ----------
+					// 客户端在握手数据中携带 data.hero（未携带默认 'newton'，非法值回退默认）。
+					// 真人玩家加入对局前，向 backend 查询该英雄是否已解锁：
+					//   - 未解锁 → 拒绝加入并定向通知（客户端可选择已解锁英雄后重连）
+					//   - backend 不可达 → 放行并记录警告（不阻塞对局）
+					//   - 'newton' 为默认解锁英雄，免查询直接放行
+					let hero = typeof data.hero === "string" ? data.hero.toLowerCase() : "";
+					if (!HERO_IDS.includes(hero)) hero = "newton";
+					data.hero = hero;
+
+					if (hero !== "newton") {
+						const unlocked = await isHeroUnlocked(uuid, hero);
+						if (unlocked === false) {
+							console.warn(
+								`[Hero] ${uuid} 尝试使用未解锁英雄 ${hero}，已拒绝加入`,
+							);
+							room.send(
+								"S2CChat",
+								JSON.stringify({
+									dest: sessionId,
+									seq: 0,
+									data: {
+										type: "hero_locked",
+										hero,
+										text: `[系统] 英雄 ${hero} 尚未解锁，无法加入对局（默认英雄 牛顿 已解锁）。`,
+									},
+								}),
+							);
+							return false;
+						} else if (unlocked === null) {
+							console.warn(
+								`[Hero] backend 不可达，${uuid} 使用英雄 ${hero} 放行`,
+							);
+						}
+					}
+					// 记录账号 uuid（对局结算时按玩家推入 backend 需要）
+					data.uuid = uuid;
+					// ---------- 英雄选择与解锁校验 ----------
 
 					// ---------- AI 机器人兵种选择（进局前 5 选 1） ----------
 					// 客户端可在握手数据中携带 data.robot（如 'drone'）；未选 / 非法则

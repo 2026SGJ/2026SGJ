@@ -10,13 +10,15 @@ const activeSessions = new Set();
 function PlayerEvent() {
 	this.messageHandlers = {};
 }
-PlayerEvent.prototype.trigger = function (event, message) {
+PlayerEvent.prototype.trigger = async function (event, message) {
 	let flag = true;
 	if (this.messageHandlers[event]) {
 		// this.messageHandlers[event].forEach(handler => handler(message));
 		for (const handler of this.messageHandlers[event]) {
 			try {
-				if (!handler(message)) flag = false;
+				// 支持异步 handler（如英雄解锁检查需要 await backend 查询）
+				const result = await handler(message);
+				if (result === false) flag = false;
 			} catch (err) {
 				console.error(err);
 				flag = false;
@@ -47,27 +49,33 @@ room.onMessage("syscmd:playerRemoved", (message) => {
 });
 
 // ============================================================
-//  syscmd:newPlayerAdded — 玩家加入但未认证
+//  syscmd:newPlayerAdded — 玩家加入但未认证（尚未握手）
+//  仅记录日志：真正的加入逻辑在 C2SHandshake → beforeNewPlayerAdded
 // ============================================================
-room.onMessage("syscmd:newPlayerAdded", (message) => {});
+room.onMessage("syscmd:newPlayerAdded", (message) => {
+	console.log(
+		`[Session] 未认证玩家进入房间: sessionId=${message.player?.sessionId}, uuid=${message.player?.uuid}`,
+	);
+});
 
 // ============================================================
 //  C2SHandshake — 玩家握手/登录
+//  （async：beforeNewPlayerAdded 的 handler 可能需 await backend
+//   英雄解锁检查，通过后才发送 S2CHandshake 并创建玩家）
 // ============================================================
-room.onMessage("C2SHandshake", (message) => {
+room.onMessage("C2SHandshake", async (message) => {
 	const uuid = message.who.extra.uuid;
 	const sessionId = message.who.sessionId;
 	const name = message.who && message.who.name ? message.who.name : "";
 
 	activeSessions.add(sessionId);
-	if (
-		!playerEvent.trigger("beforeNewPlayerAdded", {
-			sessionId,
-			uuid,
-			name,
-			event: message.msg,
-		})
-	) {
+	const ok = await playerEvent.trigger("beforeNewPlayerAdded", {
+		sessionId,
+		uuid,
+		name,
+		event: message.msg,
+	});
+	if (!ok) {
 		console.log(
 			`beforeNewPlayerAdded handler returned false for sessionId=${sessionId}, uuid=${uuid}. Player not added.`,
 		);
