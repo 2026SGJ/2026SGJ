@@ -1,10 +1,12 @@
 import process from "process";
+import { randomUUID } from "crypto";
 import room from "../../network/index.js";
 import BotPlayer, { BOT_PREFIX } from "./bot/BotPlayer.js";
 import { BASE_MAX_HP } from "./entity/base.js";
 import { pushChat } from "../chat.js";
 import { pickRandomHero } from "../../assets/data/heros/index.js";
 import { pickRandomRobotType } from "../../assets/data/robots/robots.js";
+import { pushMatchResult } from "../../backend.js";
 
 /**
  * MatchManager — 对局匹配与胜负判定管理器
@@ -32,7 +34,7 @@ import { pickRandomRobotType } from "../../assets/data/robots/robots.js";
  * ├──────────────────────────────────────────────────────────────────────┤
  * │ 10 分钟强制结算 (finished)                                                │
  * │   • 依次比较：队伍人数 → 占领前哨站 → 钱总和 → 总击杀 → 平局               │
- * │   • 结算完成后停止主循环并退出进程（预留 beforeExit 回调位置）              │
+ * │   • 结算完成后将结算数据推入 backend（_reportResult），停止主循环并退出进程 │
  * └──────────────────────────────────────────────────────────────────────┘
  *
  * 人机玩家（BotPlayer）与真人玩家在匹配完成后拥有完全同等地位：
@@ -119,16 +121,12 @@ class MatchManager {
 		this.result = null;
 
 		// ================================================================
-		//  process.on('beforeExit') 预留回调位置
+		//  结算数据上报
 		//  ----------------------------------------------------------------
-		//  胜负判定完成后，_finish() 会调用 process.exit() 退出进程。
-		//  如需在退出前执行自定义逻辑（战绩上报 / 日志落盘 / 数据持久化等），
-		//  请在此回调中编写（注意：beforeExit 仅在事件循环自然清空时触发，
-		//  若使用 process.exit() 强制退出则不会触发，届时请改用 exit 事件）。
+		//  胜负判定完成后，_finish() 会调用 _reportResult() 将本局结算数据
+		//  （对局信息 + 每名真人玩家的英雄 / 击杀 / 金钱 / 胜负）推入 backend，
+		//  随后延迟退出进程（为网络包与上报留出时间）。
 		// ================================================================
-		process.on("beforeExit", () => {
-			// TODO: 战绩上报 / 日志落盘 / 数据持久化等自定义逻辑（占位）
-		});
 	}
 
 	// ====================================================================
@@ -592,9 +590,70 @@ class MatchManager {
 		});
 		console.log(`[Match] 胜负判定完成: ${result.reason} → ${winnerText}`);
 
+		// 结算数据推入 backend（异步执行，退出延迟为其留出时间）
+		this._reportResult(result);
+
 		// 停止主循环，延迟退出让网络包刷出
 		this.game.end();
-		setTimeout(() => process.exit(0), 1000);
+		setTimeout(() => process.exit(0), 1500);
+	}
+
+	// ====================================================================
+	//  结算数据上报（matchserver → backend）
+	// ====================================================================
+
+	/**
+	 * 将本局结算数据推入 backend（数据库服务器）。
+	 *
+	 * 上报内容：
+	 *   - 对局信息：matchId / 开始时间 / 时长 / 胜方 / 原因 / 是否加时结算
+	 *   - 每名真人玩家：uuid / 名字 / 英雄 / 队伍 / 击杀 / 金钱 / 是否获胜
+	 *     （人机无账号 uuid，不参与上报）
+	 *
+	 * backend 收到后写入 matches 表，并按玩家聚合
+	 * matchesPlayed / wins / losses / kills / moneyEarned 等档案字段。
+	 *
+	 * @param {{winner: string|null, reason: string, tiebreak: boolean}} result
+	 */
+	async _reportResult(result) {
+		try {
+			const realPlayers = Object.values(this.game.players).filter(
+				(p) => !BotPlayer.isBotSession(p.sessionId),
+			);
+			if (realPlayers.length === 0) {
+				console.log("[Settle] 无真人玩家，跳过结算上报");
+				return;
+			}
+
+			const startedAt = this.gameStartedAt || Date.now();
+			const match = {
+				matchId: randomUUID(),
+				startedAt,
+				durationMs: Math.max(0, Date.now() - startedAt),
+				winner: result.winner,
+				reason: result.reason || "",
+				tiebreak: !!result.tiebreak,
+				players: realPlayers.map((p) => ({
+					uuid: p.uuid || p.sessionId,
+					name: p.name || p.sessionId,
+					hero: p.hero || "newton",
+					team: p.team || null,
+					kills: p.kills || 0,
+					money: p.money || 0,
+					won: result.winner ? p.team === result.winner : null,
+				})),
+			};
+
+			const res = await pushMatchResult(match);
+			console.log(
+				`[Settle] 结算数据已推入 backend (matchId=${match.matchId}, 真人玩家=${match.players.length})`,
+			);
+			if (res && res.ok === false) {
+				console.error(`[Settle] backend 返回错误: ${JSON.stringify(res)}`);
+			}
+		} catch (err) {
+			console.error(`[Settle] 结算数据推送失败: ${err.message}`);
+		}
 	}
 
 	// ====================================================================

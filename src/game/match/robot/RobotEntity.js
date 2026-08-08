@@ -141,6 +141,20 @@ export default class RobotEntity extends Entity {
 		this._boomMult = 1;
 		this._guaranteeBoom = false;
 
+		// ---------- 区域效果（AreaManager 维护，随进出区块附加/清除） ----------
+		/**
+		 * 当前所在区块索引（row * cols + col；-1 = 尚未判定 / 地图外）
+		 * @type {number}
+		 */
+		this._areaIndex = -1;
+		/** 当前生效的区域效果列表（机器人自身使用，供 AreaManager 维护） */
+		this._currentAreas = [];
+		/** 区域移速倍率（在 _move 中与词条移速倍率相乘，离开区块重置为 1） */
+		this._areaSpeedMult = 1;
+		/** 区域伤害倍率（在 takeDamage / _strike 中生效，离开区块重置为 1） */
+		this._areaDmgMult = 1;
+		// ---------- 区域效果 ----------
+
 		// ---------- 行为状态 ----------
 		this._attackReadyAt = 0; // 下次可攻击时间戳
 		this._mining = false; // 是否正在采矿
@@ -435,7 +449,10 @@ export default class RobotEntity extends Entity {
 			} else if (target.kind === "base") {
 				const ref = target.ref;
 				if (ref.hp > 0) {
-					ref.hp = Math.max(0, ref.hp - this.cfg.damage * this._dmgMult);
+					ref.hp = Math.max(
+						0,
+						ref.hp - this.cfg.damage * this._dmgMult * (this._areaDmgMult || 1),
+					);
 					if (ref.hp <= 0) {
 						pushChat({
 							type: "base_destroyed",
@@ -508,7 +525,7 @@ export default class RobotEntity extends Entity {
 
 	/** 移动 + 墙体碰撞（分轴处理，贴墙滑行）+ 击退衰减 */
 	_move(world) {
-		const spd = this.cfg.speed * this._speedMult;
+		const spd = this.cfg.speed * this._speedMult * (this._areaSpeedMult || 1);
 		const v = {
 			x: this.dx * spd + this._knock.x,
 			y: this.dy * spd + this._knock.y,
@@ -575,6 +592,12 @@ export default class RobotEntity extends Entity {
 	 */
 	takeDamage(amount, attacker) {
 		if (!this.alive || this.hp <= 0) return;
+
+		// 区域效果：攻击者所在区块的伤害倍率（如力量回廊 +20%）
+		if (attacker && attacker._areaDmgMult && attacker._areaDmgMult !== 1) {
+			amount = Math.round(amount * attacker._areaDmgMult);
+		}
+
 		this.hp -= amount;
 
 		// 记录攻击者（工程机器人自卫 / 哨兵警戒）

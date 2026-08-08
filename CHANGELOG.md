@@ -1,6 +1,44 @@
-# CHANGELOG
+﻿# CHANGELOG
 
 本文档记录本次代码审阅与修复的变更内容，以及审阅中发现但暂未修改的问题（拿不准、交由后续确认）。
+
+## 区域效果系统（地图分区 640×360 + 进出区块附加/清除效果）
+
+### 功能概述
+
+将整张地图（2560×7200）划分为 640×360 的区块（4 列 × 20 行 = 80 块），每个区块拥有一个区域类型与正面/负面效果：
+
+- 每个区块中心（区块内部坐标 320,180）放置一个 `type:'entity'`、`z-index:-1` 的区域实体，`asset` 为对应区域资产 id，客户端据此绘制区域底色/贴图；区块按地图尺寸精确平铺、无缝隙、无重叠（无缝衔接）；
+- 玩家 / 人机（BotPlayer）/ AI 机器人（RobotEntity）进入区块时获得对应效果，离开区块时立即清除（按区块边界精确切换）；
+- 玩家当前被附加的效果经 `S2CRender` 的 `remoteData().state.areas` 推送客户端渲染展示，离开区块自动清空。
+
+### 新增文件
+
+- **`src/assets/enum/areas/names.js` / `index.js`**：区域 asset 枚举（`AREA_SAFE` / `AREA_REGEN` / `AREA_HASTE` / `AREA_SLOW` / `AREA_POISON` / `AREA_MIGHT` / `AREA_RIFT` / `AREA_BASE_A` / `AREA_BASE_B`）。
+- **`src/assets/data/areas/index.js`**：区域数据 —— `AREA_BLOCK_W/H`（640×360）、`AREA_GRID`（20 行 × 4 列网格，围绕中轴上下对称：基地庇护 → 生命之泉 → 泥沼/疾风带 → 安全区 → 剧毒沼泽 → 力量回廊 → 混沌裂隙（中轴）→ …镜像）、`AREA_CONFIG`（每区域 `asset / name / description / kind / effects`）。效果字段：`speed`（移速倍率 %）、`damage`（伤害倍率 %）、`heal`（每秒回血）、`dot`（每秒掉血）。
+- **`src/game/match/area/AreaManager.js`**：区域管理器：
+  - `init()`：按地图尺寸生成全部区块实体（静态渲染实体，`_isStatic` + 指纹预缓存，首次全量推送后不占带宽），实体 `data` 附带 `areaId / areaName` 供客户端识别；
+  - `tick(players, robotManager)`：玩家 / 人机 / 机器人统一每 tick 结算 —— 坐标 → 区块索引（`Math.floor` 精确贴合，每点唯一映射一个区块），区块变化时先清除旧效果再附加新效果；
+  - 持续效果（回血 / 中毒）每 tick 结算，匹配阶段中毒不致死（避免大厅反复阵亡）；
+  - 伤害倍率挂在 `takeDamage` 的「攻击者侧」（`attacker._areaDmgMult`），普攻 / 技能 / 道具 / 机器人攻击 / 自爆全部伤害路径自动生效。
+- **`scripts/test_areas.js`**：区域系统回归测试（43 项断言）。运行：`node scripts/test_areas.js`。
+
+### 修改文件
+
+- **`src/game/match/player/index.js`**：
+  - 新增区域状态字段 `_areaIndex / _currentAreas / _areaSpeedMult / _areaDmgMult`；
+  - `move()` 速度倍率追加 `× _areaSpeedMult`；`takeDamage()` 攻击者侧追加区域伤害倍率；
+  - `remoteData().state.areas` 推送当前生效区域（id / name / description / asset / kind / effects）。
+- **`src/game/match/robot/RobotEntity.js`**：同样新增区域状态字段；`_move()` 追加区域移速倍率；`takeDamage()` 追加攻击者区域伤害倍率；`_strike()` 拆基地伤害追加区域倍率。
+- **`src/game/mainloop.js`**：`matchLoop` 增加 areaManager 参数，玩家与机器人 tick 之后调用 `areaManager.tick`（保证使用最新坐标）。
+- **`src/game/index.js`**：创建 `AreaManager`，World 创建完成后 `init()` 生成区块实体，主循环透传。
+- **`src/assets/assets.js`**：注册 `areas` 资产映射（`assets.areas.assets / names`）。
+
+### 客户端协议说明
+
+- 区域区块：世界静态实体（`type:'update'`），asset 为 `area_*`，`z-index:-1`，`width/height` = 640×360，`areaId / areaName` 供识别；首次全量推送后不再发送（区块永不变化）；
+- 玩家当前效果：`remoteData().state.areas`（数组）—— `[{ id, name, description, asset, kind, effects: { speed?, damage?, heal?, dot? } }]`；进入区块时推送，离开区块时清空为空数组，客户端可据此展示/隐藏区域效果图标；
+- 效果仅作用于区块内的单位：`speed/damage` 为倍率（离开重置为 1），`heal/dot` 为每 tick 结算；安全区无效果（不进入 areas 列表）。
 
 ## --no-wait 测试模式（首个玩家进入即满员开赛）
 

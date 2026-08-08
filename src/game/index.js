@@ -6,6 +6,7 @@ import World from "./match/world.js";
 import room from "../network/index.js";
 import MatchManager from "./match/manager.js";
 import RobotManager from "./match/robot/RobotManager.js";
+import AreaManager from "./match/area/AreaManager.js";
 import { isRobotType } from "../assets/data/robots/robots.js";
 import ROBOT_TYPES from "../assets/data/robots/robots.js";
 import { render } from "./render.js";
@@ -14,6 +15,8 @@ import ShopSession from "./match/shop/ShopSession.js";
 import { sendOpenShop, sendBuyItem } from "../network/shop.js";
 import { buildPopTextEntries, prunePopTexts } from "./popText.js";
 import { pushChat, flushChat } from "./chat.js";
+import { isHeroUnlocked } from "../backend.js";
+import { HERO_IDS } from "../assets/data/heros/index.js";
 
 /**
  * 世界实体全量重同步周期（tick 数）
@@ -69,6 +72,12 @@ class Game {
 		 */
 		this.robotManager = new RobotManager(this);
 		/**
+		 * 区域效果管理器（地图划分为 640×360 区块，进出区块附加/清除效果）
+		 * 玩家 / 人机 / AI 机器人统一结算，当前效果经 remoteData.state.areas 推送客户端
+		 * @type {AreaManager}
+		 */
+		this.areaManager = new AreaManager(this);
+		/**
 		 * 各玩家渲染增量同步状态：sessionId → { lastSentTick, seenEntities, seenIds, seenPlayers, lastPopTextSeq }
 		 * - lastSentTick  上次发送渲染包时的全局渲染 tick（world.renderTick）
 		 * - lastFullSyncTick 上次「全量重同步」时的渲染 tick（周期全量重推，防初始推送丢失）
@@ -92,10 +101,12 @@ class Game {
 		// 初始化游戏
 		console.log("游戏初始化");
 		this.world = new World({ map_id: "1" });
+		// 生成区域区块实体并注册到世界渲染列表（需在世界创建完成后调用）
+		this.areaManager.init();
 		Shop.resetStock(); // 重置商店库存
 		// 主循环：每 tick 更新玩家和世界，随后同步商店会话（独立协议包）
 		this.matchLoop = setInterval(() => {
-			matchLoop(this.players, this.world, this.robotManager);
+			matchLoop(this.players, this.world, this.robotManager, this.areaManager);
 			// 对局匹配 / 阶段 / 胜负判定管理（匹配广播、人机补位、基地伤害、死绝判负等）
 			this.match.tick();
 			// 同步所有玩家的物品栏（仅在变动时发送）
@@ -116,7 +127,7 @@ class Game {
 
 		playerEvent.on(
 			"beforeNewPlayerAdded",
-			({ sessionId, uuid, name, event }) => {
+			async ({ sessionId, uuid, name, event }) => {
 				try {
 					// ---------- 非匹配阶段：以旁观者身份加入 ----------
 					// 对局已开始后，新玩家不再被拒绝加入，而是成为旁观者：
@@ -169,6 +180,45 @@ class Game {
 					}
 
 					const data = JSON.parse(event).data;
+
+					// ---------- 英雄选择与解锁校验 ----------
+					// 客户端在握手数据中携带 data.hero（未携带默认 'newton'，非法值回退默认）。
+					// 真人玩家加入对局前，向 backend 查询该英雄是否已解锁：
+					//   - 未解锁 → 拒绝加入并定向通知（客户端可选择已解锁英雄后重连）
+					//   - backend 不可达 → 放行并记录警告（不阻塞对局）
+					//   - 'newton' 为默认解锁英雄，免查询直接放行
+					let hero = typeof data.hero === "string" ? data.hero.toLowerCase() : "";
+					if (!HERO_IDS.includes(hero)) hero = "newton";
+					data.hero = hero;
+
+					if (hero !== "newton") {
+						const unlocked = await isHeroUnlocked(uuid, hero);
+						if (unlocked === false) {
+							console.warn(
+								`[Hero] ${uuid} 尝试使用未解锁英雄 ${hero}，已拒绝加入`,
+							);
+							room.send(
+								"S2CChat",
+								JSON.stringify({
+									dest: sessionId,
+									seq: 0,
+									data: {
+										type: "hero_locked",
+										hero,
+										text: `[系统] 英雄 ${hero} 尚未解锁，无法加入对局（默认英雄 牛顿 已解锁）。`,
+									},
+								}),
+							);
+							return false;
+						} else if (unlocked === null) {
+							console.warn(
+								`[Hero] backend 不可达，${uuid} 使用英雄 ${hero} 放行`,
+							);
+						}
+					}
+					// 记录账号 uuid（对局结算时按玩家推入 backend 需要）
+					data.uuid = uuid;
+					// ---------- 英雄选择与解锁校验 ----------
 
 					// ---------- AI 机器人兵种选择（进局前 5 选 1） ----------
 					// 客户端可在握手数据中携带 data.robot（如 'drone'）；未选 / 非法则
