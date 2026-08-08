@@ -127,9 +127,16 @@ matchserver 通过 `colyseus.js` 客户端（`src/network/client.js`）加入 cc
 | --- | --- |
 | `KeyW` / `KeyA` / `KeyS` / `KeyD` | 移动（上 / 左 / 下 / 右） |
 | `KeyR` | 普攻（冷却就绪且非技能释放中） |
-| `KeyF` | 释放当前选中技能（扣金钱、进入前摇、记冷却） |
+| `KeyQ` | 释放技能 1（独立按键，见 `_tryCastSkill`） |
+| `KeyF` | 释放技能 2（独立按键，见 `_tryCastSkill`） |
+| `KeyT` | 释放技能 3（独立按键，见 `_tryCastSkill`） |
+| `KeyG` | 释放技能 4（独立按键，见 `_tryCastSkill`） |
 | `KeyE` | 边沿触发：靠近己方前哨站（25px）设置重生点；按住：开采矿物 |
 | `Digit1` ~ `Digit9` / `Digit0` | 使用物品栏 1 ~ 10 号位道具（边沿触发） |
+
+> 技能释放不再共享单一按键：Q / F / T / G 分别对应 skill1 ~ skill4，
+> 无需先经 `C2SSwitchSkills` 选中（`selectedSkill` 由服务端在按键释放时自动记录，
+> `C2SSwitchSkills` 仍可用于 HUD 高亮切换）。
 
 服务端每 tick 合并键盘 + 手柄 + 触屏按键后统一处理（`mergeInputKeys`）。
 
@@ -176,7 +183,10 @@ matchserver 通过 `colyseus.js` 客户端（`src/network/client.js`）加入 cc
 | 左摇杆 | 移动（KeyW/A/S/D） |
 | 右摇杆 | 瞄准方向（aimDir，影响道具发射方向） |
 | A | 普攻（KeyR） |
-| X | 释放技能（KeyF） |
+| X | 技能 1（KeyQ） |
+| Y | 技能 2（KeyF） |
+| LB | 技能 3（KeyT） |
+| RB | 技能 4（KeyG） |
 | B | 交互（KeyE：商店 / 开采 / 设置重生点） |
 | RT | 普攻（KeyR） |
 | LT | 使用 1 号位道具（Digit1） |
@@ -220,7 +230,8 @@ matchserver 通过 `colyseus.js` 客户端（`src/network/client.js`）加入 cc
 | 左虚拟摇杆 | 移动（KeyW/A/S/D） |
 | 右虚拟摇杆 / 世界坐标点击 | 瞄准方向 |
 | `attack` | 普攻（KeyR） |
-| `skill` | 释放技能（KeyF） |
+| `skill` | 技能 1（KeyQ，兼容旧虚拟按键） |
+| `skill1` ~ `skill4` | 技能 1 ~ 4（KeyQ / KeyF / KeyT / KeyG） |
 | `interact` | 交互（KeyE） |
 | `useItem` | 使用 1 号位道具（Digit1） |
 | `item1` ~ `item10` | 使用对应槽位道具（Digit1 ~ Digit0） |
@@ -420,9 +431,10 @@ AI 机器人 ≠ 人机补位：不进入 `players`，开局由 `RobotManager.sp
 ```
 
 实体类型（来自地图 `src/game/map/1.json` 与运行时）：`entity`（装饰）、`wall`（墙体）、
-`title`（标题）、`mineral`（矿物）、`outpost`（前哨站）、`shop`（商店）、`base`（基地），
-以及运行时生成的**道具实体**（炸弹 / 火球 / 地雷 / 手雷 / 闪光弹 / 烟雾弹 / 毒镖 /
-冰冻陷阱 / 治疗图腾，见 `src/game/match/item/*.js`）与 **AI 机器人**（`robot_<sessionId>`）。
+`title`（标题）、`mineral`（矿物）、`outpost`（前哨站）、`shop`（商店）、`base`（基地）、
+`text`（客户端文本，见 §3.2.5），以及运行时生成的**道具实体**（炸弹 / 火球 / 地雷 / 手雷 /
+闪光弹 / 烟雾弹 / 毒镖 / 冰冻陷阱 / 治疗图腾，见 `src/game/match/item/*.js`）与
+**AI 机器人**（`robot_<sessionId>`）。
 墙体 / 标题 / 装饰为静态实体，仅首次全量发送一次。
 
 #### 3.2.2 玩家更新条目（`type: "update"`）
@@ -460,8 +472,9 @@ AI 机器人 ≠ 人机补位：不进入 `players`，开局由 `RobotManager.sp
     "aimDir": "{\"x\":0,\"y\":-1}",                       // 瞄准方向（JSON 字符串）
     "lastClick": null,                                    // 最近点击坐标
     "speed": "{\"x\":0,\"y\":0}",                         // 速度（JSON 字符串）
-    "buffs": [ { "id": "speed", "level": 1, "remaining": 5000 } ],  // Buff 列表
-    "areas": [],                                          // 当前区域效果
+    // 注意：Buff 列表与区域效果不再经 state 推送 ——
+    // 已改为玩家专属 ClientText 实体（右上角状态效果列表，见 §3.2.5），
+    // 使用完毕即删除。
     "inventory": [                                        // 物品栏
       { "itemId": "bomb", "count": 2, "name": "炸弹",
         "description": "...", "type": "placeable",
@@ -501,6 +514,37 @@ AI 机器人 ≠ 人机补位：不进入 `players`，开局由 `RobotManager.sp
 
 每条文字带全局递增 `seq`，服务端按玩家记录 `lastPopTextSeq` 保证每条恰好投递一次，
 过期（超过 duration）条目不再投递。
+
+#### 3.2.5 客户端文本实体（`type: "update"` + `cloneType: "text"`）
+
+玩家专属 HUD 文本（右上角状态效果列表 / 头顶交互提示）经 `ClientText` 实体推送，
+渲染条目格式：
+
+```jsonc
+{
+  "type": "update",
+  "id": "abc123_status_0", // 实体唯一 id（玩家 sessionId 前缀，仅该玩家可见）
+  "x": 96, "y": 6,          // 位置（isFixed=true 时为视口归一化 0~100）
+  "asset": "text",
+  "isShowed": true,
+  "cloneType": "text",      // 客户端据此创建文本对象（而非贴图实体）
+  "text": "加速 8s",         // 文本内容
+  "textColor": "#81c784",   // 文本颜色（# 十六进制）
+  "isFixed": true,           // true = 屏幕固定坐标；false = 世界坐标（头顶提示）
+  "z-index": 1000
+}
+```
+
+- **可见性**：玩家专属 ClientText 只出现在**所属玩家本人**的渲染包中（其他玩家不可见）；
+- **生命周期**：状态结束 / 提示消失时服务端自动删除（`removeClientText`），并发送
+  `{ type: "delete", id }` 删除包通知客户端释放缓存；
+- **内容**：
+  - 右上角状态效果列表（`status_0`、`status_1` …）：buff/debuff（名称 + 剩余秒数）、
+    护盾数值、眩晕 / 隐身 / 减速 / 加速、当前区域效果；
+  - 头顶交互提示（`hint`，世界坐标）：回城引导 / 开采进度 / 「按 E 开采」/「按 E 打开商店」/
+    「按 E 设置重生点」。
+- **实现**：`src/game/match/entity/text.js`（`ClientText` 继承 `Entity`），
+  由 `Player.syncStatusTexts` 每 tick 同步，渲染增量规则与普通实体一致。
 
 ### 3.3 C2CChat — 公屏聊天广播
 

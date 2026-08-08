@@ -22,6 +22,7 @@ import FreezeTrapEntity from "../item/freezeTrap.js";
 import HealingTotemEntity from "../item/healingTotem.js";
 import { pushPopText } from "../../popText.js";
 import { pushChat } from "../../chat.js";
+import ClientText from "../entity/text.js";
 
 /** 夹取到 [-1, 1]（非有限数值返回 0） */
 const clamp1 = (v) => {
@@ -33,6 +34,29 @@ const clamp01 = (v) => {
 	const n = Number(v);
 	return Number.isFinite(n) ? Math.max(0, Math.min(1, n)) : 0;
 };
+
+/**
+ * 状态效果展示元数据：buff id → { name, color(#hex) }
+ * 右上角状态效果列表（ClientText）展示使用
+ */
+const STATUS_EFFECT_META = {
+	damage: { name: "灼烧", color: "#ff7043" },
+	freeze: { name: "冰冻", color: "#4fc3f7" },
+	strength: { name: "强化", color: "#ffd54f" },
+	rebound: { name: "反弹", color: "#ba68c8" },
+	stun: { name: "眩晕", color: "#ffd54f" },
+	speed: { name: "加速", color: "#81c784" },
+	shield: { name: "护盾", color: "#4fc3f7" },
+	poison: { name: "中毒", color: "#9ccc65" },
+	invisible: { name: "隐身", color: "#b39ddb" },
+};
+
+/** 右上角状态效果列表：起始 / 步进坐标（屏幕固定坐标 0~100，自上而下排列） */
+const STATUS_TEXT_X = 96;
+const STATUS_TEXT_Y = 6;
+const STATUS_TEXT_LINE_GAP = 4;
+/** 头顶交互提示文本：距玩家头顶的偏移（世界坐标，像素） */
+const HINT_TEXT_OFFSET_Y = 45;
 
 /**
  * 深拷贝英雄配置（按玩家独立一份）
@@ -54,14 +78,15 @@ const deepCloneHeroData = (data, heroId) => {
  * 负责处理输入、移动、技能、开采矿物等全部玩家逻辑。
  *
  * 按键映射（PC 键盘）：
- *   WASD    — 移动
- *   R       — 普攻（basic attack）
- *   F       — 释放当前选中的技能
- *   E       — 靠近商店时打开商店（优先级最高）；否则靠近矿物时开采
+ *   WASD          — 移动
+ *   R             — 普攻（basic attack）
+ *   Q / F / T / G — 技能 1 / 技能 2 / 技能 3 / 技能 4（独立按键，不再共享 F 键）
+ *   E             — 靠近商店时打开商店（优先级最高）；否则靠近矿物时开采
  *
  * 技能切换（不再使用 C 键轮换）：
  *   客户端通过 C2SSwitchSkills 包显式指定目标技能槽位（id: 1~4），
- *   服务端据此直接设置 selectedSkill（见 switchSkill()）
+ *   服务端据此直接设置 selectedSkill（见 switchSkill()）；
+ *   技能释放不再依赖选中槽位：Q/F/T/G 独立按键直接释放对应技能（见 _tryCastSkill）
  *
  * 三端操作支持：
  *   - 键盘：C2SKeyboardEvent（KeyHolding / KeyDown / KeyUp）
@@ -148,6 +173,16 @@ class Player {
 		/** @type {Object<number, number>} 技能冷却结束时间戳 map: skillIndex → cooldownEndTimestamp */
 		this.skillCooldowns = {};
 		// ---------- 多技能系统 ----------
+
+		// ---------- 客户端文本（ClientText，玩家专属 HUD / 提示） ----------
+		/**
+		 * 玩家专属 ClientText 实体集合：id → ClientText 实例
+		 * （右上角状态效果列表 / 头顶交互提示等，仅发送给该玩家本人）
+		 * 由 syncStatusTexts 每 tick 同步，使用完毕即删除（removeClientText）
+		 * @type {Object<string, import('../entity/text.js').default>}
+		 */
+		this.clientTexts = {};
+		// ---------- 客户端文本 ----------
 
 		// ---------- 矿物开采相关 ----------
 		/** @type {boolean} 当前 tick 是否按下 E 键且附近有矿物 */
@@ -778,11 +813,14 @@ class Player {
 	 *   左摇杆   → 移动（KeyW/A/S/D，语义与键盘一致）
 	 *   右摇杆   → 瞄准方向（影响道具投射物发射方向）
 	 *   A        → 普攻（KeyR）
-	 *   X        → 释放技能（KeyF）
+	 *   X        → 技能 1（KeyQ）
+	 *   Y        → 技能 2（KeyF）
+	 *   LB       → 技能 3（KeyT）
+	 *   RB       → 技能 4（KeyG）
 	 *   B        → 交互（KeyE：商店/开采/设置重生点）
-	 *   技能切换不占用手柄按键：客户端经 C2SSwitchSkills 包直选（id: 1~4）
 	 *   RT（扳机）→ 普攻（KeyR）
 	 *   LT（扳机）→ 使用 1 号位道具（Digit1）
+	 *   技能切换不占用手柄按键：客户端经 C2SSwitchSkills 包直选（id: 1~4）
 	 */
 	processGamepadInput() {
 		const gp = this._gamepadState;
@@ -810,7 +848,10 @@ class Player {
 
 		// ---- ABXY ----
 		if (B.a) this._gamepadKeys.add("KeyR");
-		if (B.x) this._gamepadKeys.add("KeyF");
+		if (B.x) this._gamepadKeys.add("KeyQ"); // 技能 1
+		if (B.y) this._gamepadKeys.add("KeyF"); // 技能 2
+		if (B.lb) this._gamepadKeys.add("KeyT"); // 技能 3
+		if (B.rb) this._gamepadKeys.add("KeyG"); // 技能 4
 		if (B.b) this._gamepadKeys.add("KeyE");
 
 		// ---- 扳机 ----
@@ -827,7 +868,8 @@ class Player {
 	 *   右虚拟摇杆(aim)  → 瞄准方向
 	 *   虚拟按键：
 	 *     attack      → 普攻（KeyR）
-	 *     skill       → 释放技能（KeyF）
+	 *     skill       → 技能 1（KeyQ，兼容旧虚拟按键）
+	 *     skill1~4    → 技能 1~4（KeyQ / KeyF / KeyT / KeyG）
 	 *     interact    → 交互（KeyE：商店/开采/设置重生点）
 	 *     useItem     → 使用 1 号位道具（Digit1）
 	 *   技能切换不占虚拟按键：客户端经 C2SSwitchSkills 包直选（id: 1~4）
@@ -855,7 +897,11 @@ class Player {
 		// ---- 虚拟按键 ----
 		const BTN_MAP = {
 			attack: "KeyR",
-			skill: "KeyF",
+			skill: "KeyQ", // 兼容旧虚拟按键：默认释放技能 1
+			skill1: "KeyQ",
+			skill2: "KeyF",
+			skill3: "KeyT",
+			skill4: "KeyG",
 			interact: "KeyE",
 			useItem: "Digit1",
 		};
@@ -996,29 +1042,20 @@ class Player {
 						}
 					}
 					break;
+				// ---- 技能独立按键：Q / F / T / G 分别对应技能 1 ~ 4 ----
+				// 不再共享单一技能键（旧 KeyF 释放“当前选中技能”）；
+				// 按住持续触发，冷却 / 金钱 / 前摇校验见 _tryCastSkill
+				case "KeyQ":
+					this._tryCastSkill(1);
+					break;
 				case "KeyF":
-					// 释放当前选中技能 — 匹配阶段禁止；仅在未攻击且未被禁止攻击时允许
-					if (
-						canAct &&
-						!this.attacking &&
-						!this.usingSkill &&
-						!this.cantAttack
-					) {
-						const skillKey = `skill${this.selectedSkill}`;
-						if (this.isSkillReady(this.selectedSkill)) {
-							const skillData = this.args.attacks[skillKey];
-							if (skillData) {
-								// 检查金钱消耗
-								if ((skillData.cost || 0) <= this.money) {
-									this.money -= skillData.cost || 0;
-									this.usingSkill = true;
-									this.skillCastForward = skillData.forward || 0;
-									// 记录冷却
-									this.skillCooldowns[this.selectedSkill] = Date.now();
-								}
-							}
-						}
-					}
+					this._tryCastSkill(2);
+					break;
+				case "KeyT":
+					this._tryCastSkill(3);
+					break;
+				case "KeyG":
+					this._tryCastSkill(4);
 					break;
 				case "KeyE":
 					// 匹配阶段禁止商店/采矿/重生点交互
@@ -1131,6 +1168,219 @@ class Player {
 		if (!lastUsed) return 0;
 		const remaining = skillData.cd - (Date.now() - lastUsed);
 		return Math.max(0, remaining);
+	}
+
+	/**
+	 * 尝试释放指定槽位技能（技能独立按键共用入口）
+	 *
+	 * 前置校验：行动许可（匹配阶段禁止）/ 未在普攻 / 未在释放其他技能 /
+	 * 未被禁止攻击 / 技能存在且冷却完毕 / 金钱足够。
+	 * 成功时记录当前技能槽位（processSkillCast 按 selectedSkill 释放）。
+	 *
+	 * @param {number} skillIndex - 1~4
+	 * @returns {boolean} 是否成功开始释放
+	 */
+	_tryCastSkill(skillIndex) {
+		if (!this.canAct || this.attacking || this.usingSkill || this.cantAttack) {
+			return false;
+		}
+		const skillKey = `skill${skillIndex}`;
+		const skillData = this.args.attacks[skillKey];
+		if (!skillData) return false;
+		if (!this.isSkillReady(skillIndex)) return false;
+		// 检查金钱消耗
+		if ((skillData.cost || 0) > this.money) return false;
+		// 记录当前技能槽位（processSkillCast 按 selectedSkill 释放）
+		this.selectedSkill = skillIndex;
+		this.money -= skillData.cost || 0;
+		this.usingSkill = true;
+		this.skillCastForward = skillData.forward || 0;
+		// 记录冷却
+		this.skillCooldowns[skillIndex] = Date.now();
+		return true;
+	}
+
+	// ============================================================
+	//  客户端文本（ClientText）— 玩家专属 HUD / 提示
+	//  除生命值与金钱（经 remoteData().state）外，其他需要显示在
+	//  客户端的信息统一使用 ClientText 实体，使用完毕即删除。
+	// ============================================================
+
+	/**
+	 * 创建 / 更新一条玩家专属 ClientText（仅发送给该玩家本人）
+	 *
+	 * 已存在同 id 文本时更新内容 / 颜色 / 位置；否则创建并加入该玩家的
+	 * 个人渲染列表（不进入 world.entities，其他玩家不可见）。
+	 * 使用完毕后必须调用 removeClientText 删除（增量渲染会向该玩家发送
+	 * { type:'delete', id } 删除包，通知客户端停止跟踪并释放缓存）。
+	 *
+	 * @param {string} id - 文本唯一 id（玩家内唯一，如 'status_0' / 'hint'）
+	 * @param {Object} opts
+	 * @param {string} opts.text - 文本内容
+	 * @param {string} [opts.textColor] - '#RRGGBB' 十六进制颜色
+	 * @param {number} [opts.x] - 位置 X（isFixed=true 时为视口归一化 0~100）
+	 * @param {number} [opts.y] - 位置 Y
+	 * @param {boolean} [opts.isFixed] - true = 屏幕固定坐标；false = 世界坐标
+	 * @param {number} [opts.z_index] - 渲染层级
+	 * @returns {import('../entity/text.js').default|null}
+	 */
+	setClientText(id, { text, textColor, x, y, isFixed, z_index }) {
+		const world = this._worldRef;
+		if (!world) return null;
+		let t = this.clientTexts[id];
+		if (!t) {
+			t = new ClientText({
+				id: `${this.sessionId}_${id}`,
+				x: x ?? 0,
+				y: y ?? 0,
+				text,
+				textColor,
+				isFixed,
+				z_index,
+			});
+			this.clientTexts[id] = t;
+		} else {
+			t.setText(text, textColor);
+			if (x != null && y != null) t.setPosition(x, y);
+			if (isFixed != null) t.data.isFixed = isFixed;
+		}
+		return t;
+	}
+
+	/**
+	 * 删除一条玩家专属 ClientText（文本使用完毕时调用）
+	 * 标记删除 → 增量渲染向该玩家发送 { type:'delete', id } 删除包
+	 * @param {string} id
+	 */
+	removeClientText(id) {
+		const t = this.clientTexts[id];
+		if (!t) return;
+		delete this.clientTexts[id];
+		if (this._worldRef) this._worldRef.markEntityRemoved({ id: t.data.id });
+	}
+
+	/** 删除该玩家的全部 ClientText（玩家离开 / 死亡时调用） */
+	removeAllClientTexts() {
+		for (const id of Object.keys(this.clientTexts)) {
+			this.removeClientText(id);
+		}
+	}
+
+	/**
+	 * 每 tick 同步玩家专属 ClientText：
+	 *   - 右上角状态效果列表（buffs / 护盾 / 眩晕 / 隐身 / 减速 / 加速 / 区域效果）
+	 *   - 玩家头顶交互提示（回城引导 / 开采 / 商店 / 重生点）
+	 *
+	 * 状态结束 / 提示消失时自动删除对应文本（使用完毕即删除）。
+	 * 由 Player.tick 在 buffs / 附近检测完成后调用。
+	 */
+	syncStatusTexts() {
+		const world = this._worldRef;
+		if (!world) return;
+
+		// ---- 死亡：清空全部客户端文本 ----
+		if (this.dead) {
+			this.removeAllClientTexts();
+			return;
+		}
+
+		// ---- 1. 右上角状态效果列表（屏幕固定坐标，自上而下排列） ----
+		const lines = [];
+		// Buff / Debuff（含剩余秒数）
+		for (const buff of this.buffs) {
+			const meta = STATUS_EFFECT_META[buff.id] || {
+				name: buff.id,
+				color: "#ffffff",
+			};
+			const secs = Math.ceil(buff.getRemainingTime() / 1000);
+			lines.push({ text: `${meta.name} ${secs}s`, color: meta.color });
+		}
+		// 非 Buff 状态效果（护盾 / 眩晕 / 隐身 / 减速 / 加速）
+		if (this.shield > 0) {
+			lines.push({ text: `护盾 ${Math.round(this.shield)}`, color: "#4fc3f7" });
+		}
+		if (this.stunned) {
+			lines.push({ text: "眩晕", color: "#ffd54f" });
+		}
+		if (this.invisible) {
+			lines.push({ text: "隐身", color: "#b39ddb" });
+		}
+		if (this.slowAmount > 0) {
+			lines.push({
+				text: `减速 ${Math.round(this.slowAmount * 100)}%`,
+				color: "#90a4ae",
+			});
+		}
+		if (this.speedMultiplier > 1) {
+			lines.push({
+				text: `加速 ${Math.round((this.speedMultiplier - 1) * 100)}%`,
+				color: "#81c784",
+			});
+		}
+		// 区域效果（随进出区块实时更新）
+		for (const area of this._currentAreas || []) {
+			const color =
+				area.kind === "negative"
+					? "#ef5350"
+					: area.kind === "positive"
+						? "#81c784"
+						: "#b0bec5";
+			lines.push({ text: area.name, color });
+		}
+
+		const usedIds = [];
+		lines.forEach((line, i) => {
+			const id = `status_${i}`;
+			usedIds.push(id);
+			this.setClientText(id, {
+				text: line.text,
+				textColor: line.color,
+				x: STATUS_TEXT_X,
+				y: STATUS_TEXT_Y + i * STATUS_TEXT_LINE_GAP,
+				isFixed: true,
+			});
+		});
+		// 删除多余 / 已失效的状态文本（使用完毕即删除）
+		for (const id of Object.keys(this.clientTexts)) {
+			if (id.startsWith("status_") && !usedIds.includes(id)) {
+				this.removeClientText(id);
+			}
+		}
+
+		// ---- 2. 头顶交互提示（世界坐标，优先级：回城 > 开采 > 商店 > 重生点） ----
+		let hint = null;
+		if (this.inventory && this.inventory.isChannelingTeleport) {
+			hint = {
+				text: `回城中 ${Math.ceil(
+					this.inventory.teleportChannelRemaining / 100,
+				) * 100}ms`,
+				color: "#81c784",
+			};
+		} else if (this.mining && this.miningTarget) {
+			const pct = Math.min(
+				100,
+				Math.round((this.miningTime / this.miningTarget.config.miningTime) * 100),
+			);
+			hint = { text: `开采中 ${pct}%`, color: "#ffd54f" };
+		} else if (this.canMine && this.miningTarget) {
+			hint = { text: "按 E 开采", color: "#ffffff" };
+		} else if (this.canShop && this.shopTarget) {
+			hint = { text: "按 E 打开商店", color: "#ffffff" };
+		} else if (this.canSetSpawn && this.spawnOutpostTarget) {
+			hint = { text: "按 E 设置重生点", color: "#ffffff" };
+		}
+
+		if (hint) {
+			this.setClientText("hint", {
+				text: hint.text,
+				textColor: hint.color,
+				x: this.x,
+				y: this.y - HINT_TEXT_OFFSET_Y,
+				isFixed: false,
+			});
+		} else {
+			this.removeClientText("hint");
+		}
 	}
 
 	// ---------- 矿物开采 ----------
@@ -1719,13 +1969,9 @@ class Player {
 					x: Player._trimCoord(this.speed.x),
 					y: Player._trimCoord(this.speed.y),
 				}),
-				buffs: this.buffs.map((b) => ({
-					id: b.id,
-					level: b.level,
-					remaining: b.getRemainingTime(),
-				})),
-				// 当前生效的区域效果（随进出区块实时更新，供客户端渲染展示）
-				areas: this._currentAreas || [],
+				// 注意：Buff 列表与区域效果不再经 state 推送 ——
+				// 已改为玩家专属 ClientText 实体（右上角状态效果列表，见
+				// syncStatusTexts），使用完毕即删除。
 				// 新增道具/物品栏相关状态
 				inventory: this.inventory ? this.inventory.serialize() : [],
 				shield: this.shield || 0,
@@ -1769,6 +2015,8 @@ class Player {
 			this.attacking = false;
 			this.usingSkill = false;
 			this.mining = false;
+			// 死亡：清空玩家专属客户端文本（右上角状态效果 / 头顶提示）
+			this.syncStatusTexts();
 			return;
 		}
 
@@ -1797,6 +2045,8 @@ class Player {
 		this.processSkills(players, robots);
 		this.processBuffs();
 		this.processTeleportChannel(); // 回城卷轴引导
+		// 同步玩家专属 ClientText（右上角状态效果列表 / 头顶交互提示）
+		this.syncStatusTexts();
 		// 旁观者幽灵玩家：渲染 asset 恒为 "none"（客户端据此不绘制模型）
 		this.costume = this.isSpectator
 			? "none"

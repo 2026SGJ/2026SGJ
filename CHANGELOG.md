@@ -2,6 +2,56 @@
 
 本文档记录本次代码审阅与修复的变更内容，以及审阅中发现但暂未修改的问题（拿不准、交由后续确认）。
 
+## 客户端文本实体（ClientText）+ 状态效果列表 + 技能独立按键
+
+### 功能概述
+
+1. **新增 `text` 实体类型与 `ClientText` 类**：`src/game/match/entity/text.js` 中新增 `ClientText`
+   继承 `Entity`，渲染数据约定 `cloneType: 'text'`（客户端据此创建文本对象而非贴图实体）、
+   `text`（文本内容）、`textColor`（`#RRGGBB` 十六进制颜色）、`isFixed`（true = 屏幕固定
+   坐标 0~100；false = 世界坐标）。实体枚举新增 `TEXT: 'text'`。
+2. **右上角状态效果列表**：每名玩家的所有状态效果（buff/debuff 名称 + 剩余秒数、护盾数值、
+   眩晕 / 隐身 / 减速 / 加速、当前区域效果）经玩家专属 `ClientText` 实体在屏幕右上角
+   （x=96，y 自上而下排列）展示，仅发送给所属玩家本人；状态结束即删除（`removeClientText`）。
+3. **技能独立按键**：技能释放不再共享单一按键（旧 KeyF 释放当前选中技能），改为
+   Q / F / T / G 分别对应 skill1 ~ skill4（`_tryCastSkill` 统一入口，自动记录
+   `selectedSkill`）；手柄 X / Y / LB / RB 与触屏 `skill1` ~ `skill4` 虚拟按键同步映射。
+   `C2SSwitchSkills` 保留（HUD 高亮切换）。
+4. **除生命值与金钱外，客户端展示信息统一走 ClientText**：`remoteData().state` 移除
+   `buffs` 与 `areas` 字段（原用于客户端展示，现改为右上角 ClientText 列表）；头顶交互提示
+   （回城引导 / 开采进度 / 按 E 开采 / 按 E 打开商店 / 按 E 设置重生点）亦使用 ClientText
+   （世界坐标），交互结束即删除。生命值与金钱仍经 `state.health / state.money` 推送。
+
+### 修改文件
+
+- **`src/game/match/entity/text.js`（新增）**：`ClientText` 类（继承 `Entity`），携带
+  `cloneType:'text' / text / textColor(#hex) / isFixed`，提供 `setText` / `setPosition`。
+- **`src/game/match/player/index.js`**：
+  - 新增 `clientTexts` 集合与 `setClientText` / `removeClientText` / `removeAllClientTexts` /
+    `syncStatusTexts`（每 tick 同步右上角状态列表 + 头顶提示，使用完毕即删除）；
+  - `processKeyholding`：KeyQ/F/T/G → skill1~4（新增 `_tryCastSkill` 统一释放入口）；
+  - `processGamepadInput`：X/Y/LB/RB → 技能 1~4；`processTouchInput`：`skill1`~`skill4` 虚拟按键；
+  - `tick()`：死亡分支与主流程末尾调用 `syncStatusTexts`；
+  - `remoteData().state`：移除 `buffs` / `areas`（改为 ClientText 展示）。
+- **`src/game/index.js`**：
+  - `_refreshRenderFingerprints`：新增玩家专属 ClientText 指纹刷新（个人文本不进入
+    `world.entities`，避免广播给其他玩家）；
+  - `_buildRenderPacket`：新增步骤 3.6 —— 把所属玩家的 ClientText 追加进本人渲染包
+    （首次全量 + 增量，删除经 `{ type:'delete', id }` 通知本人）；
+  - `playerRemoved`：玩家 / 旁观者幽灵玩家移除时调用 `removeAllClientTexts` 清理。
+- **`src/assets/enum/entities/names.js`**：新增 `TEXT: 'text'`。
+- **`scripts/test_areas.js`**：客户端展示断言改为验证 ClientText（cloneType / textColor / isFixed /
+  离开区块自动删除）。
+- **`API.md`**：按键映射（键盘 / 手柄 / 触屏）、§3.2.5 客户端文本实体、`state` 字段变更说明。
+
+### 回归测试
+
+- `scripts/_test_client_text.js`（临时）：ClientText 结构 / 状态列表增删 / 头顶提示增删 /
+  技能独立按键 / 渲染包增量与 delete 包（28 项断言）。运行：`node scripts/_test_client_text.js`。
+- `scripts/_test_game_smoke.js`（临时）：真实 Game + 网络 stub 全链路（主循环 tick → 指纹刷新 →
+  渲染包组装 → 文本删除 → 玩家移除清理，8 项断言）。运行：`node scripts/_test_game_smoke.js`。
+- `scripts/test_areas.js`：43 项断言全部通过（ClientText 展示区域效果）。
+
 ## 禁用英雄功能（禁用英雄不可被玩家或人机使用）
 
 ### 功能概述

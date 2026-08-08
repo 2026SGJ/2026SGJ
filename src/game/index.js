@@ -356,6 +356,8 @@ class Game {
 			if (this.spectators[sessionId]) {
 				delete this.spectators[sessionId];
 				// 清理旁观者幽灵玩家（其渲染包只发给自己，断开即无引用）
+				const ghost = this.spectatorPlayers[sessionId];
+				if (ghost) ghost.removeAllClientTexts();
 				delete this.spectatorPlayers[sessionId];
 				delete this._renderStates[sessionId];
 				console.log(`Spectator removed: sessionId=${sessionId}, uuid=${uuid}`);
@@ -377,6 +379,8 @@ class Game {
 				removed._shopSession?.dispose();
 				// 清理其 AI 机器人（机器人跟随玩家归属，玩家离开 → 机器人移除）
 				this.robotManager.removeRobotFor(sessionId);
+				// 清理其专属 ClientText（右上角状态效果 / 头顶提示，使用完毕即删除）
+				removed.removeAllClientTexts();
 				delete this.players[sessionId];
 				delete this._renderStates[sessionId];
 				console.log(`Player removed: sessionId=${sessionId}, uuid=${uuid}`);
@@ -686,6 +690,19 @@ class Game {
 				sp._lastRenderData = data;
 			}
 		}
+		// 4) 玩家专属 ClientText 指纹（右上角状态效果 / 头顶提示等个人 HUD 文本）
+		// 个人文本不进入 world.entities（避免广播给其他玩家），由这里统一参与
+		// 增量同步：内容 / 位置 / 颜色变化即标记 _lastChangeTick，渲染组装时
+		// 仅发送给所属玩家本人。
+		for (const p of Object.values(this.players)) {
+			for (const t of Object.values(p.clientTexts)) {
+				const fp = JSON.stringify(t.getRenderData());
+				if (fp !== t._renderFingerprint) {
+					t._renderFingerprint = fp;
+					t._lastChangeTick = renderTick;
+				}
+			}
+		}
 	}
 
 	/**
@@ -795,6 +812,26 @@ class Game {
 			} else {
 				state.seenPlayers.add(ghost.sessionId);
 				packet.push(ghost.remoteData());
+			}
+		}
+
+		// ---- 3.6 玩家 / 旁观者专属 ClientText：仅发送给本人 ----
+		// 右上角状态效果列表 / 头顶交互提示等个人 HUD 文本：只出现在所属
+		// 玩家自己的渲染包中（其他玩家不可见）。增量规则与实体一致：
+		// 首次全量 + 之后仅发送变化的；文本删除经 _pendingRemovals 的
+		// { type:'delete', id } 删除包通知本人释放缓存（见步骤 2）。
+		const self = this.players[sessionId] || this.spectatorPlayers[sessionId];
+		if (self) {
+			for (const t of Object.values(self.clientTexts)) {
+				if (state.seenEntities.has(t)) {
+					if (t._lastChangeTick > lastSentTick) {
+						packet.push(t.getRenderData());
+					}
+				} else {
+					state.seenEntities.add(t);
+					state.seenIds.add(t.data.id);
+					packet.push(t.getRenderData());
+				}
 			}
 		}
 

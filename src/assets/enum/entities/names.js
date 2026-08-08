@@ -23,4 +23,6 @@ export default {
 	ROBOT_DRONE: "robot_drone",
 	/** AI 机器人（5 选 1）— 哨兵机器人（跟随玩家补伤害） */
 	ROBOT_SENTINEL: "robot_sentinel",
+	/** 客户端文本实体（ClientText，cloneType:'text'）— 玩家 HUD / 提示文本 */
+	TEXT: "text",
 };

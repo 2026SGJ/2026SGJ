@@ -13,7 +13,8 @@
  *   5. 持续效果：回血 / 中毒掉血每 tick 结算；匹配阶段中毒不致死
  *   6. 伤害倍率：攻击者位于力量回廊/混沌裂隙时，普攻 / 技能 / 机器人攻击伤害提升
  *   7. 机器人：同玩家一样获得区域效果（speed / damage / heal / dot）
- *   8. 客户端展示：remoteData().state.areas 携带当前生效区域（id/name/asset/effects）
+ *   8. 客户端展示：区域效果经玩家专属 ClientText（syncStatusTexts）展示，
+ *      携带 cloneType:'text' / text / textColor(#hex)；离开区块后文本自动删除
  *
  * 运行：node scripts/test_areas.js
  */
@@ -458,35 +459,40 @@ check(
 	`机器人疾风带移速倍率 1.25（实际 ${hasteRobot._areaSpeedMult}）`,
 );
 
-console.log("\n[7] 客户端渲染展示");
+// ============================================================
+// 8. 客户端展示（玩家专属 ClientText 状态效果）
+// ============================================================
+console.log("\n[8] 客户端展示（ClientText）");
 const clientPlayer = makePlayer("p_client", "A", 1600, 3780); // rift
+// syncStatusTexts 需要世界引用（真实对局中由 Player.tick 设置）
+clientPlayer._worldRef = world;
 tick({ p_client: clientPlayer });
-const rd = clientPlayer.remoteData();
+clientPlayer.syncStatusTexts();
+const statusText = clientPlayer.clientTexts["status_0"];
 check(
-	Array.isArray(rd.state.areas) &&
-		rd.state.areas.length === 1 &&
-		rd.state.areas[0].id === "rift",
-	"remoteData().state.areas 携带当前区域",
+	statusText && statusText.data.text.includes("混沌裂隙"),
+	"状态效果 ClientText 展示当前区域（混沌裂隙）",
 );
 check(
-	rd.state.areas[0].name === "混沌裂隙" &&
-		rd.state.areas[0].asset === AreaNames.AREA_RIFT,
-	"areas 携带展示用 name / asset",
+	statusText &&
+		statusText.data.cloneType === "text" &&
+		typeof statusText.data.textColor === "string" &&
+		statusText.data.textColor.startsWith("#"),
+	"ClientText 携带 cloneType:'text' / text / textColor(#hex)",
 );
 check(
-	rd.state.areas[0].effects.dot === 5 &&
-		rd.state.areas[0].effects.damage === 15,
-	"areas 携带 effects 明细",
+	statusText && statusText.data.isFixed === true,
+	"状态效果列表为屏幕固定坐标（右上角 HUD）",
 );
 
-// 离开后 areas 清空（移动到安全区：row9 col1）
+// 离开后文本自动删除（移动到安全区：row9 col1）
 clientPlayer.x = 960;
 clientPlayer.y = 3420;
 tick({ p_client: clientPlayer });
-const rd2 = clientPlayer.remoteData();
+clientPlayer.syncStatusTexts();
 check(
-	Array.isArray(rd2.state.areas) && rd2.state.areas.length === 0,
-	"离开区块后 areas 清空（客户端可隐藏展示）",
+	!clientPlayer.clientTexts["status_0"],
+	"离开区块后状态文本已删除（使用完毕即删除）",
 );
 
 // 基地庇护：回血
