@@ -47,6 +47,23 @@ const pick = (envName, jsonKey, def) => {
   return def;
 };
 
+/**
+ * 解析「逗号分隔字符串或数组」为小写去空白字符串数组
+ * （环境变量 DISABLED_HEROES 为逗号分隔字符串，config.json 的 disabledHeroes 为数组）
+ */
+const parseList = (value) => {
+  if (Array.isArray(value)) {
+    return value.map((v) => String(v).trim().toLowerCase()).filter(Boolean);
+  }
+  if (typeof value === 'string' && value.trim()) {
+    return value
+      .split(',')
+      .map((v) => v.trim().toLowerCase())
+      .filter(Boolean);
+  }
+  return [];
+};
+
 export const config = {
   // ---- 对局服务器（ccw.site）凭据 ----
   uuid: pick('CCW_UUID', 'uuid', ''),
@@ -64,6 +81,12 @@ export const config = {
     '',
   ),
   backendToken: pick('BACKEND_TOKEN', 'backendToken', ''),
+
+  // ---- 禁用英雄 ----
+  // 被禁用的英雄不可被玩家选择，也不可被人机（BotPlayer）随机使用。
+  // 配置来源：环境变量 DISABLED_HEROES（逗号分隔，如 'tesla,mendel'）
+  // 或 data/config.json 的 disabledHeroes（数组，如 ["tesla", "mendel"]）。
+  disabledHeroes: parseList(pick('DISABLED_HEROES', 'disabledHeroes', '')),
 };
 
 /** 是否具备可用的对局服务器登录凭据（占位符不算） */
@@ -88,6 +111,8 @@ export function writeDefaultConfigIfMissing() {
     roomId: 'your-room-id',
     backendUrl: 'http://127.0.0.1:8787',
     backendToken: '',
+    // 禁用英雄（不可被玩家选择 / 人机使用），如 ["tesla", "mendel"]
+    disabledHeroes: [],
   };
   fs.mkdirSync(configDir, { recursive: true });
   fs.writeFileSync(configPath, JSON.stringify(defaultConfig, null, 4));

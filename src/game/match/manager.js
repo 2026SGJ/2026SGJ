@@ -294,7 +294,7 @@ class MatchManager {
 		this.game.botCounter++;
 		const botId = `${BOT_PREFIX}${this.game.botCounter}`;
 		const botName = `人机${this.game.botCounter}`;
-		// 人机随机选择英雄（12 名英雄池，与真人一致）
+		// 人机随机选择英雄（从可用英雄池中挑选，禁用英雄不会被人机使用）
 		const botHero = pickRandomHero();
 		const bot = new BotPlayer(botId, {
 			team: chosenTeam,
