@@ -2,6 +2,36 @@
 
 本文档记录本次代码审阅与修复的变更内容，以及审阅中发现但暂未修改的问题（拿不准、交由后续确认）。
 
+## 禁用英雄功能（禁用英雄不可被玩家或人机使用）
+
+### 功能概述
+
+通过服务器配置禁用指定英雄：被禁用的英雄既不可被玩家选择，也不可被人机（BotPlayer）随机使用。
+
+- **玩家**：握手携带被禁用英雄 → 不拒绝加入，自动回退默认英雄并发送定向 `S2CChat`（`type: "hero_disabled"`，携带 `hero` / `fallback`）通知客户端；
+- **人机**：`pickRandomHero` 仅从可用英雄池随机挑选，禁用英雄永不出现；
+- **默认英雄顺延**：默认英雄正常为 `newton`，若 `newton` 被禁用则自动顺延到第一个可用英雄（`DEFAULT_HERO`），且默认英雄始终免 backend 解锁校验；
+- **防御性兑底**：若全部英雄均被禁用，回退为全量英雄列表，保证对局仍可进行。
+
+### 配置方式
+
+- `data/config.json` 的 `disabledHeroes` 数组（如 `["tesla", "mendel"]`）；
+- 或环境变量 `DISABLED_HEROES`（逗号分隔，如 `tesla,mendel`）；
+- 大小写不敏感，自动小写规范化去空。
+
+### 修改文件
+
+- **`src/config.js`**：新增 `config.disabledHeroes`（`DISABLED_HEROES` 环境变量 / `disabledHeroes` 配置项），新增 `parseList` 解析辅助；默认配置模板补充 `disabledHeroes: []`。
+- **`src/assets/data/heros/index.js`**：新增 `DISABLED_HEROES` 集合 / `isHeroDisabled()` / `ENABLED_HERO_IDS`（可用英雄池）/ `DEFAULT_HERO`（默认英雄，自动顺延）；`pickRandomHero()` 改为从可用英雄池挑选。
+- **`src/game/index.js`**：玩家加入时新增禁用英雄校验（回退默认 + `hero_disabled` 定向通知）；解锁校验改为对非默认英雄执行（默认英雄免查询）；旁观者幽灵玩家填充英雄改用 `DEFAULT_HERO`。
+- **`src/game/match/manager.js`**：人机补位英雄选择注释更新（`pickRandomHero` 已自动排除禁用英雄）。
+- **`API.md`**：握手流程 / S2CChat 消息类型表 / 5.1 英雄 id 附录补充禁用英雄说明。
+
+### 回归测试（临时，位于 gitignore 的 data/ 目录）
+
+- `data/_test_disabled_heroes.mjs`：配置解析（环境变量 / config.json / 默认）、`isHeroDisabled`、`ENABLED_HERO_IDS`、`DEFAULT_HERO` 顺延、`pickRandomHero` 5 万次采样无禁用英雄、全禁用回退。运行：`node data/_test_disabled_heroes.mjs`。
+- `data/_test_disabled_heroes_join.mjs`：玩家禁用英雄回退加入 + `hero_disabled` 通知 + 默认英雄免 backend 查询 + 人机补位全用可用英雄（11 名禁用，确定性断言）。运行：`DISABLED_HEROES="newton,...,archimedes" node data/_test_disabled_heroes_join.mjs`。
+
 ## 区域效果系统（地图分区 640×360 + 进出区块附加/清除效果）
 
 ### 功能概述
