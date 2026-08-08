@@ -239,6 +239,21 @@ room.onMessage("C2SUseItem", (message) => {
 	playerEvent.trigger("useItem", { sessionId, uuid, event: message.msg });
 });
 
+// ============================================================
+//  C2SSwitchSkills — 切换技能请求
+//  已取消 C 键轮换，改由客户端显式指定目标技能槽位：
+//    { data: { id: 1|2|3|4 } }  （id 对应 skill1 ~ skill4）
+// ============================================================
+room.onMessage("C2SSwitchSkills", (message) => {
+	const sessionId = message.who.sessionId;
+	if (!activeSessions.has(sessionId)) {
+		console.log(`C2SSwitchSkills from unknown session ${sessionId} ignored.`);
+		return;
+	}
+	const uuid = message.who.extra.uuid;
+	playerEvent.trigger("switchSkills", { sessionId, uuid, event: message.msg });
+});
+
 room.onStateChange((newState) => {
 	// playerEvent.trigger('stateChange', { newState });
 	// console.log(`Room state changed: `, newState.players);

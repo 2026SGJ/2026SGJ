@@ -1,0 +1,26 @@
+[
+  {
+    "asset": "newton_idle",
+    "url": "/assets/heros/newton_idle.png"
+  },
+  {
+    "asset": "newton_run1",
+    "url": "/assets/heros/newton_run1.png"
+  },
+  {
+    "asset": "tesla_idle",
+    "url": "/assets/heros/tesla_idle.png"
+  },
+  {
+    "asset": "base_A",
+    "url": "/assets/entities/base_A.png"
+  },
+  {
+    "asset": "base_B",
+    "url": "/assets/entities/base_B.png"
+  },
+  {
+    "asset": "shop",
+    "url": "/assets/entities/shop.png"
+  }
+]

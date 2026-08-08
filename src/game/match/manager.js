@@ -669,6 +669,14 @@ class MatchManager {
 		// 全员解锁行动（人机与真人同等地位）
 		for (const p of Object.values(this.game.players)) {
 			p.canAct = true;
+			// 匹配阶段玩家可自由移动：开赛瞬间传送回各自基地
+			// A 队出生点（底部 1280, 6840），B 队出生点（顶部 1280, 360）
+			p.x = 1280;
+			p.y = p.team === "A" ? 6840 : 360;
+			p.hitbox.x = p.x - 25;
+			p.hitbox.y = p.y - 25;
+			p.speed.set(0, 0);
+			p.knockback.set(0, 0);
 		}
 
 		// 重置基地血量（固定 4000）
