@@ -13,6 +13,7 @@ import { pickRandomRobotType } from "../../assets/data/robots/robots.js";
  *
  * ┌──────────────────────────────────────────────────────────────────────┐
  * │ 匹配阶段 (matching)                                                    │
+ * │   • --no-wait 测试模式：首个真人进入即补满 8 人并立即开赛（跳过倒计时）     │
  * │   • 真人 >= 2 时启动 120 秒倒计时                                        │
  * │   • 真人满 4 / 6 / 8 人时依次压缩倒计时至 60 / 30 / 5 秒                 │
  * │   • 按剩余时间里程碑补人机：90s→3人 60s→4人 45s→5人 30s→6人 15s→7人 5s→8人 │
@@ -86,9 +87,19 @@ const TICKS_PER_SEC = 20;
 class MatchManager {
 	/**
 	 * @param {import('../index.js').default} game — Game 实例（提供 players / world / end）
+	 * @param {Object} [options] — 启动参数
+	 * @param {boolean} [options.noWait=false] — --no-wait 测试模式：首个真人进入即满员开赛
 	 */
-	constructor(game) {
+	constructor(game, options = {}) {
 		this.game = game;
+
+		/**
+		 * --no-wait 测试模式开关（由命令行 --no-wait 传入）
+		 * 启用后首个真人玩家进入匹配即立即补满 8 人（瞬间创建 7 个人机）并开始对局，
+		 * 跳过 120 秒倒计时等待，用于快速联调 / 自动化测试。
+		 * @type {boolean}
+		 */
+		this.noWait = !!options.noWait;
 
 		/** @type {string} 当前阶段（见 Phase 枚举） */
 		this.phase = Phase.MATCHING;
@@ -174,6 +185,7 @@ class MatchManager {
 	 * 真人加入回调（Game 层在玩家创建完成后调用）
 	 *
 	 * 规则：
+	 *   0. --no-wait 测试模式：首个真人进入 → 立即补满 8 人（瞬间创建 7 个人机）并开赛
 	 *   1. 房内有人机时优先踢掉人机（为真人腾出位置）
 	 *   2. 真人 >= 2 → 启动 120 秒倒计时
 	 *   3. 真人满 4 / 6 / 8 → 压缩倒计时至 60 / 30 / 5 秒
@@ -195,6 +207,17 @@ class MatchManager {
 		}
 
 		const humans = this.realPlayerCount();
+
+		// 0) --no-wait 测试模式：首个真人进入即满员开赛
+		//    不等待倒计时，瞬间补齐 7 个人机凑满 8 人（4v4），直接开始对局。
+		if (this.noWait && humans >= 1) {
+			console.log(
+				`[Match] --no-wait 模式：首个真人进入（${humans} 名），立即补满 8 人并开始对局`,
+			);
+			this.ensureTotalPlayers(8);
+			this._startGame();
+			return;
+		}
 
 		// 2) 至少 2 名真人 → 启动 120 秒倒计时
 		if (!this.countdownStarted && humans >= 2) {

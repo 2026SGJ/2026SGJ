@@ -40,7 +40,7 @@ const FULL_RESYNC_TICKS = 100;
  * 以 sessionId 为 key 追踪玩家实体
  */
 class Game {
-	constructor() {
+	constructor(options = {}) {
 		this.matchLoop = null;
 		this.players = {}; // sessionId → Player（含 BotPlayer）
 		/**
@@ -62,7 +62,7 @@ class Game {
 		 * 负责匹配倒计时、人机补位、基地伤害、死绝判负、强制结算等
 		 * @type {MatchManager}
 		 */
-		this.match = new MatchManager(this);
+		this.match = new MatchManager(this, options);
 		/**
 		 * AI 机器人管理器（AI 机器人 ≠ 人机补位：不进入 players，不作为玩家对待）
 		 * 每名玩家进局前 5 选 1 部署一个机器人，对局开始时 spawnAll
